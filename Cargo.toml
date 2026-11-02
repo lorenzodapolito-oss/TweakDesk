@@ -1,0 +1,26 @@
+[package]
+name = "tweakdesk"
+version = "1.0.0"
+edition = "2021"
+description = "TweakDesk - estrae le impostazioni personali di Windows e le applica su qualsiasi PC"
+authors = ["Lorenzo D'Apolito"]
+license = "MIT"
+
+[dependencies]
+eframe = { version = "0.36", default-features = false, features = ["default_fonts", "glow", "wayland", "x11"] }
+rfd = "0.17"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+regex = "1"
+chrono = "0.4"
+
+[lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
+strip = true
