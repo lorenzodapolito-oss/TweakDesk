@@ -3,3 +3,7 @@ target/
 
 Backup/
 *.tweakdesk.json
+installdesk.json
+Installer/
+Script/
+Estensioni/
