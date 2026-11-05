@@ -13,9 +13,9 @@ taskkill /f /im tweakdesk.exe >nul 2>&1
 
 echo === Scarico o aggiorno TweakDesk ===
 if exist "%PROG%\TweakDesk\.git" (
-  git -C "%PROG%\TweakDesk" fetch origin
+  git -c "safe.directory=*" -C "%PROG%\TweakDesk" fetch origin
   if errorlevel 1 goto fail
-  git -C "%PROG%\TweakDesk" reset --hard origin/main
+  git -c "safe.directory=*" -C "%PROG%\TweakDesk" reset --hard origin/main
 ) else (
   git clone https://github.com/lorenzodapolito-oss/TweakDesk "%PROG%\TweakDesk"
 )
