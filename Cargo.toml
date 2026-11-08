@@ -1,8 +1,8 @@
 [package]
 name = "tweakdesk"
-version = "2.0.0"
+version = "2.1.0"
 edition = "2021"
-description = "TweakDesk - impostazioni di Windows, programmi, estensioni di Chrome e script di configurazione"
+description = "TweakDesk - impostazioni di Windows, programmi, estensioni, script, pulizia, avvio automatico e backup di sistema"
 authors = ["Lorenzo D'Apolito"]
 license = "MIT"
 

@@ -3,6 +3,7 @@
 
 mod app;
 mod catalog;
+mod clean;
 mod engine;
 mod install;
 mod model;

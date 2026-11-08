@@ -28,3 +28,13 @@ e le **applica su qualsiasi altro PC**, con copia di sicurezza e possibilità di
 - **1 Scansiona il PC / 2 Scarica / 3 Installa**: elenca i programmi installati che winget sa scaricare, ne salva gli installer nella cartella predefinita (saltando quelli già aggiornati) e li installa in silenzio.
 - **Estensioni Chrome**: estrae le estensioni di tutti i profili, salva un elenco (`.json` + pagina `.html`) e le reinstalla aprendo il Web Store a gruppi di 8 oppure con i criteri di Chrome (amministratore; `Rimuovi-installazione-forzata.reg` li annulla).
 - **Configurazione Windows**: script incorporati (MegaConfig, Italiano + orario, Ottimizza, Attivazione, Blocca Windows Update, sposta cartelle su D:, esporta/importa menu Start e taskbar, Gallery). Quelli ad alto impatto chiedono conferma. `W11ClassicMenu.exe` va copiato nella cartella `Script`.
+
+## Pulizia e avvio (alla CCleaner)
+
+Terza sezione, **Pulizia e avvio**:
+
+- **Pulizia**: «1 Analizza» mostra quanto spazio si libera, «2 Pulisci» elimina. Voci: file temporanei (utente e Windows), cestino, miniature, rapporti di errore, dump di memoria, registri, download di Windows Update, cache DNS e shader, cache di Chrome, Edge, Brave, Firefox (cookie e cronologia a parte, spenti di default), Discord, Spotify, Teams, Office, VS Code, Steam, NVIDIA. Nel gruppo **Avanzate**: componenti superati di WinSxS e `Windows.old` (spenti di default, con avviso).
+- **Avvio automatico**: elenca i programmi che partono con Windows (chiavi Run, cartelle Esecuzione automatica, attività pianificate all'accesso). La casella li **disattiva/riattiva** come il Task Manager (reversibile); «Elimina» li rimuove salvando prima una copia in `BackupAvvio`.
+- **Backup di sistema (install.wim)**: crea una copia ombra (VSS) del disco e la salva con `dism /Capture-Image` in un file `.wim` (come Dism++). Non sovrascrive file esistenti; esclude pagefile, hiberfil e il file stesso.
+
+Sicurezza: ogni percorso viene espanso da variabili d'ambiente (se mancano, la voce è saltata), `..` e radici dei dischi sono rifiutati, i collegamenti simbolici non vengono seguiti, e i file in uso vengono saltati senza errori. Le voci che richiedono l'amministratore sono segnate e saltate se non lo sei.

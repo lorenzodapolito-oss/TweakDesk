@@ -1,5 +1,6 @@
 //! Finestra principale di TweakDesk: impostazioni di Windows e installazione.
 
+use crate::clean::panel::CleanPanel;
 use crate::install::app::InstallPanel;
 use crate::theme;
 use crate::tweak_panel::TweakPanel;
@@ -13,12 +14,14 @@ pub const APP_VERSION: &str = env!("CARGO_PKG_VERSION");
 enum Section {
     Tweaks,
     Install,
+    Clean,
 }
 
 pub struct App {
     section: Section,
     tweak: TweakPanel,
     install: InstallPanel,
+    clean: CleanPanel,
 }
 
 impl App {
@@ -28,6 +31,7 @@ impl App {
             section: Section::Tweaks,
             tweak: TweakPanel::new(open),
             install: InstallPanel::new(),
+            clean: CleanPanel::new(),
         }
     }
 }
@@ -55,12 +59,18 @@ impl eframe::App for App {
                     Section::Install,
                     RichText::new("Programmi, estensioni e script").size(16.0),
                 );
+                ui.selectable_value(
+                    &mut self.section,
+                    Section::Clean,
+                    RichText::new("Pulizia e avvio").size(16.0),
+                );
             });
             ui.add_space(4.0);
         });
         match self.section {
             Section::Tweaks => self.tweak.show(ui),
             Section::Install => self.install.show(ui),
+            Section::Clean => self.clean.show(ui),
         }
     }
 }
