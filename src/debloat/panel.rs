@@ -17,6 +17,7 @@ use std::sync::mpsc::{channel, Receiver, Sender};
 enum Event {
     Log(Kind, String),
     Editions(Result<Vec<Edition>, String>),
+    Oscdimg(PathBuf),
     Finished,
 }
 
@@ -140,6 +141,7 @@ impl DebloatPanel {
                         format!("Lettura della ISO non riuscita: {e}"),
                     ),
                 },
+                Event::Oscdimg(p) => self.oscdimg = p.to_string_lossy().to_string(),
                 Event::Finished => self.busy = false,
             }
         }
@@ -217,6 +219,27 @@ impl DebloatPanel {
             }
             Err(e) => {
                 let _ = tx.send(Event::Log(Kind::Err, e));
+            }
+        });
+    }
+
+    fn install_adk(&mut self, ctx: &egui::Context) {
+        let work = PathBuf::from(self.work.trim());
+        self.say(
+            theme::LOG_INFO,
+            "Installo il Windows ADK (Deployment Tools)…",
+        );
+        self.spawn(ctx, move |tx| {
+            let t2 = tx.clone();
+            match iso::adk_install(&RealSys, &RealEnv, &work, &mut |k, m| {
+                let _ = t2.send(Event::Log(k, m.to_string()));
+            }) {
+                Ok(p) => {
+                    let _ = tx.send(Event::Oscdimg(p));
+                }
+                Err(e) => {
+                    let _ = tx.send(Event::Log(Kind::Err, e));
+                }
             }
         });
     }
@@ -427,8 +450,23 @@ impl DebloatPanel {
                 });
             });
             if self.oscdimg.trim().is_empty() {
-                ui.label(RichText::new("oscdimg.exe non trovato: installa il Windows ADK (solo «Deployment Tools») oppure indica il file.").color(theme::WARN));
+                ui.label(RichText::new("oscdimg.exe non trovato: scarica e installa il Windows ADK (solo «Deployment Tools») con il pulsante, oppure indica il file.").color(theme::WARN));
             }
+            ui.horizontal(|ui| {
+                let can = !self.busy && self.is_admin;
+                if ui
+                    .add_enabled(can, egui::Button::new(RichText::new("Scarica e installa ADK (Deployment Tools)").strong()).fill(theme::DOWNLOAD))
+                    .clicked()
+                {
+                    self.install_adk(ctx);
+                }
+                if ui.button("Apri la pagina ufficiale dell'ADK").clicked() {
+                    let _ = RealSys.run("cmd", &["/c", "start", "", iso::ADK_PAGE]);
+                }
+                if !self.is_admin {
+                    ui.label(RichText::new("Servono i permessi di amministratore.").color(theme::WARN));
+                }
+            });
             ui.add_space(6.0);
             ui.horizontal(|ui| {
                 if ui.add_enabled(!self.busy, egui::Button::new("Leggi le edizioni della ISO")).clicked() {

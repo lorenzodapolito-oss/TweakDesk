@@ -123,6 +123,71 @@ pub fn find_oscdimg(env: &dyn Env) -> Option<PathBuf> {
         .find(|p| p.is_file())
 }
 
+/// Programma di installazione del Windows ADK (scaricato direttamente da Microsoft).
+pub const ADK_URL: &str =
+    "https://download.microsoft.com/download/6/7/4/674ec7db-7c89-4f2b-8363-689055c2b430/adk/adksetup.exe";
+/// Pagina ufficiale, se il download diretto non funziona.
+pub const ADK_PAGE: &str = "https://learn.microsoft.com/windows-hardware/get-started/adk-install";
+
+/// Scarica e installa solo i «Deployment Tools» del Windows ADK (contengono `oscdimg`).
+pub fn adk_install(
+    sys: &dyn Sys,
+    env: &dyn Env,
+    work: &Path,
+    log: &mut dyn FnMut(Kind, &str),
+) -> Result<PathBuf, String> {
+    if let Some(p) = find_oscdimg(env) {
+        log(Kind::Ok, "oscdimg.exe è già presente");
+        return Ok(p);
+    }
+    if !sys.is_admin() {
+        return Err(
+            "Servono i permessi di amministratore (riavvia TweakDesk come amministratore)".into(),
+        );
+    }
+    fs::create_dir_all(work).map_err(|e| format!("{}: {e}", work.display()))?;
+    let setup = work.join("adksetup.exe");
+    let _ = fs::remove_file(&setup);
+    log(
+        Kind::Info,
+        "Scarico il programma di installazione del Windows ADK da Microsoft…",
+    );
+    let dl = format!(
+        "$ProgressPreference = 'SilentlyContinue'; [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; \
+         Invoke-WebRequest -UseBasicParsing -Uri {} -OutFile {}",
+        ps_quote(ADK_URL),
+        ps_quote(&setup.to_string_lossy())
+    );
+    ps(sys, &dl)
+        .map_err(|e| format!("Download non riuscito: {e}. Puoi scaricarlo a mano da {ADK_PAGE}"))?;
+    let size = fs::metadata(&setup).map(|m| m.len()).unwrap_or(0);
+    if size < 1_000_000 {
+        let _ = fs::remove_file(&setup);
+        return Err(format!(
+            "Il file scaricato non è valido. Scaricalo a mano da {ADK_PAGE}"
+        ));
+    }
+    log(
+        Kind::Info,
+        "Installo i Deployment Tools (qualche minuto, serve internet)…",
+    );
+    let run = format!(
+        "$p = Start-Process -FilePath {} -ArgumentList '/quiet','/norestart','/ceip','off','/features','OptionId.DeploymentTools' -Wait -PassThru; \
+         if ($p.ExitCode -ne 0 -and $p.ExitCode -ne 3010) {{ exit $p.ExitCode }}",
+        ps_quote(&setup.to_string_lossy())
+    );
+    let r = ps(sys, &run);
+    let _ = fs::remove_file(&setup);
+    r.map_err(|e| format!("Installazione non riuscita: {e}"))?;
+    let found = find_oscdimg(env)
+        .ok_or("Installato, ma oscdimg.exe non è stato trovato: indica il file a mano")?;
+    log(
+        Kind::Ok,
+        &format!("oscdimg.exe pronto: {}", found.display()),
+    );
+    Ok(found)
+}
+
 pub fn selected_items(ids: &[String]) -> Result<Vec<&'static Item>, String> {
     let mut v = Vec::new();
     for id in ids {
@@ -613,6 +678,7 @@ pub fn build(sys: &dyn Sys, plan: &Plan, log: &mut dyn FnMut(Kind, &str)) -> Res
 mod tests {
     use super::*;
     use crate::clean::sys::fake::FakeSys;
+    use std::collections::HashMap;
 
     fn tmp(tag: &str) -> PathBuf {
         let d = std::env::temp_dir().join(format!("tdiso_{}_{tag}", std::process::id()));
@@ -707,6 +773,100 @@ mod tests {
         assert!(validate(&p).unwrap_err().contains("esiste già"));
         p.iso_out = p.iso_in.clone();
         assert!(validate(&p).is_err());
+        let _ = fs::remove_dir_all(&d);
+    }
+
+    struct TestEnv(HashMap<String, String>);
+    impl Env for TestEnv {
+        fn var(&self, n: &str) -> Option<String> {
+            self.0.get(n).cloned()
+        }
+    }
+
+    fn adk_env(d: &Path) -> TestEnv {
+        TestEnv(
+            [(
+                "ProgramFiles(x86)".to_string(),
+                d.join("pf").to_string_lossy().to_string(),
+            )]
+            .into(),
+        )
+    }
+
+    fn oscdimg_path(d: &Path) -> PathBuf {
+        join_rel(
+            &d.join("pf"),
+            "Windows Kits\\10\\Assessment and Deployment Kit\\Deployment Tools\\amd64\\Oscdimg\\oscdimg.exe",
+        )
+    }
+
+    #[test]
+    fn adk_install_downloads_then_installs_only_deployment_tools() {
+        let d = tmp("adk");
+        let sys = FakeSys {
+            admin: true,
+            ..FakeSys::default()
+        };
+        let dest = d.join("w").join("adksetup.exe");
+        sys.hooks.borrow_mut().push((
+            "Invoke-WebRequest".into(),
+            Box::new(move |_| {
+                let _ = fs::write(&dest, vec![0u8; 2_000_000]);
+            }),
+        ));
+        let exe = oscdimg_path(&d);
+        sys.hooks
+            .borrow_mut()
+            .push(("Start-Process".into(), Box::new(move |_| touch(&exe))));
+        let p = adk_install(&sys, &adk_env(&d), &d.join("w"), &mut |_, _| {}).unwrap();
+        assert!(p.ends_with("oscdimg.exe"));
+        let c = sys.commands.borrow().clone();
+        assert!(c[0].contains(ADK_URL) && c[0].contains("Invoke-WebRequest"));
+        assert!(c[1].contains("OptionId.DeploymentTools") && c[1].contains("'/quiet'"));
+        assert!(
+            !d.join("w").join("adksetup.exe").exists(),
+            "l'installer scaricato viene tolto"
+        );
+        let _ = fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn adk_install_is_skipped_when_oscdimg_exists() {
+        let d = tmp("adk2");
+        touch(&oscdimg_path(&d));
+        let sys = FakeSys::default();
+        assert!(adk_install(&sys, &adk_env(&d), &d.join("w"), &mut |_, _| {}).is_ok());
+        assert!(sys.commands.borrow().is_empty());
+        let _ = fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn adk_install_needs_admin_and_rejects_bad_downloads() {
+        let d = tmp("adk3");
+        let sys = FakeSys::default();
+        assert!(
+            adk_install(&sys, &adk_env(&d), &d.join("w"), &mut |_, _| {})
+                .unwrap_err()
+                .contains("amministratore")
+        );
+        let sys = FakeSys {
+            admin: true,
+            ..FakeSys::default()
+        };
+        let dest = d.join("w").join("adksetup.exe");
+        sys.hooks.borrow_mut().push((
+            "Invoke-WebRequest".into(),
+            Box::new(move |_| {
+                let _ = fs::write(&dest, b"<html>errore</html>");
+            }),
+        ));
+        let e = adk_install(&sys, &adk_env(&d), &d.join("w"), &mut |_, _| {}).unwrap_err();
+        assert!(e.contains("non è valido"));
+        assert!(!sys
+            .commands
+            .borrow()
+            .iter()
+            .any(|c| c.contains("Start-Process")));
         let _ = fs::remove_dir_all(&d);
     }
 
