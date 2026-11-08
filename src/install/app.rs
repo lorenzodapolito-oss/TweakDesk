@@ -34,7 +34,7 @@ enum PcState {
 }
 
 #[derive(Clone, Copy, PartialEq)]
-enum Tab {
+pub enum Tab {
     Pc,
     Folder,
     Ext,
@@ -76,6 +76,10 @@ pub struct InstallPanel {
 }
 
 impl InstallPanel {
+    pub fn set_tab(&mut self, t: Tab) {
+        self.tab = t;
+    }
+
     pub fn new() -> Self {
         let app_dir = config::app_dir();
         let cfg_path = app_dir.join(config::CONFIG_FILE);
@@ -703,85 +707,86 @@ impl InstallPanel {
         self.pump();
         self.drain_ext();
         let ctx = ui.ctx().clone();
-        egui::Panel::top("top").show(ui, |ui| {
-            ui.add_space(6.0);
-            ui.horizontal(|ui| {
-                ui.label("Cartella predefinita:");
-                ui.label(RichText::new(self.root().display().to_string()).strong());
-                if ui.button("Cambia…").clicked() {
-                    self.choose_folder();
-                }
-                if ui.button("Apri").clicked() {
-                    self.open_folder();
-                }
-            });
-            ui.add_space(4.0);
-            ui.horizontal(|ui| {
-                let idle = !self.busy;
-                if Self::big_button(ui, "1  Scansiona il PC", theme::SCAN, idle) {
-                    self.tab = Tab::Pc;
-                    self.start_scan();
-                }
-                if Self::big_button(
-                    ui,
-                    "2  Scarica",
-                    theme::DOWNLOAD,
-                    idle && !self.pc.is_empty(),
-                ) {
-                    self.download_pc();
-                }
-                if Self::big_button(
-                    ui,
-                    "3  Installa",
-                    theme::INSTALL,
-                    idle && !self.rows.is_empty(),
-                ) {
-                    self.confirm_install = true;
-                }
-                if self.busy {
-                    ui.spinner();
-                    if ui.button("Interrompi").clicked() {
-                        self.cancel.store(true, Ordering::SeqCst);
+        let programs = matches!(self.tab, Tab::Pc | Tab::Folder);
+        if programs {
+            egui::Panel::top("top").show(ui, |ui| {
+                ui.add_space(6.0);
+                ui.horizontal(|ui| {
+                    ui.label("Cartella predefinita:");
+                    ui.label(RichText::new(self.root().display().to_string()).strong());
+                    if ui.button("Cambia…").clicked() {
+                        self.choose_folder();
                     }
-                }
+                    if ui.button("Apri").clicked() {
+                        self.open_folder();
+                    }
+                });
+                ui.add_space(4.0);
+                ui.horizontal(|ui| {
+                    let idle = !self.busy;
+                    if Self::big_button(ui, "1  Scansiona il PC", theme::SCAN, idle) {
+                        self.tab = Tab::Pc;
+                        self.start_scan();
+                    }
+                    if Self::big_button(
+                        ui,
+                        "2  Scarica",
+                        theme::DOWNLOAD,
+                        idle && !self.pc.is_empty(),
+                    ) {
+                        self.download_pc();
+                    }
+                    if Self::big_button(
+                        ui,
+                        "3  Installa",
+                        theme::INSTALL,
+                        idle && !self.rows.is_empty(),
+                    ) {
+                        self.confirm_install = true;
+                    }
+                    if self.busy {
+                        ui.spinner();
+                        if ui.button("Interrompi").clicked() {
+                            self.cancel.store(true, Ordering::SeqCst);
+                        }
+                    }
+                });
+                ui.horizontal_wrapped(|ui| {
+                    ui.selectable_value(&mut self.tab, Tab::Pc, "Programmi del PC");
+                    ui.selectable_value(&mut self.tab, Tab::Folder, "Installer scaricati");
+                    ui.separator();
+                    let idle = !self.busy;
+                    if ui
+                        .add_enabled(idle, egui::Button::new("Controlla aggiornamenti"))
+                        .clicked()
+                    {
+                        self.start_check();
+                    }
+                    if ui
+                        .add_enabled(idle, egui::Button::new("Scarica aggiornamenti"))
+                        .clicked()
+                    {
+                        self.download_selected();
+                    }
+                    if ui.button("Aggiungi programmi…").clicked() {
+                        self.catalog_open = true;
+                    }
+                    if ui
+                        .add_enabled(idle, egui::Button::new("Crea script silenziosi"))
+                        .clicked()
+                    {
+                        self.make_scripts();
+                    }
+                    if ui
+                        .add_enabled(idle, egui::Button::new("Aggiorna elenco"))
+                        .clicked()
+                    {
+                        self.refresh();
+                    }
+                });
+                ui.add_space(4.0);
             });
-            ui.horizontal_wrapped(|ui| {
-                ui.selectable_value(&mut self.tab, Tab::Pc, "Programmi del PC");
-                ui.selectable_value(&mut self.tab, Tab::Folder, "Installer scaricati");
-                ui.selectable_value(&mut self.tab, Tab::Ext, "Estensioni Chrome");
-                ui.selectable_value(&mut self.tab, Tab::Setup, "Configurazione Windows");
-                ui.separator();
-                let idle = !self.busy;
-                if ui
-                    .add_enabled(idle, egui::Button::new("Controlla aggiornamenti"))
-                    .clicked()
-                {
-                    self.start_check();
-                }
-                if ui
-                    .add_enabled(idle, egui::Button::new("Scarica aggiornamenti"))
-                    .clicked()
-                {
-                    self.download_selected();
-                }
-                if ui.button("Aggiungi programmi…").clicked() {
-                    self.catalog_open = true;
-                }
-                if ui
-                    .add_enabled(idle, egui::Button::new("Crea script silenziosi"))
-                    .clicked()
-                {
-                    self.make_scripts();
-                }
-                if ui
-                    .add_enabled(idle, egui::Button::new("Aggiorna elenco"))
-                    .clicked()
-                {
-                    self.refresh();
-                }
-            });
-            ui.add_space(4.0);
-        });
+        }
         egui::Panel::bottom("log").show(ui, |ui| {
             egui::Frame::new()
                 .fill(theme::LOG_BG)

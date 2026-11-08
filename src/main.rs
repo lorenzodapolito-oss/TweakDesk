@@ -26,7 +26,11 @@ fn main() -> eframe::Result {
     let open = std::env::args_os().nth(1).map(std::path::PathBuf::from);
     let options = eframe::NativeOptions {
         viewport: eframe::egui::ViewportBuilder::default()
-            .with_title(format!("{} v{}", app::APP_TITLE, app::APP_VERSION))
+            .with_title(format!(
+                "{} di Lorenzo D'Apolito v{}",
+                app::APP_TITLE,
+                app::APP_VERSION
+            ))
             .with_inner_size([1200.0, 760.0])
             .with_min_inner_size([800.0, 480.0])
             .with_icon(app_icon()),

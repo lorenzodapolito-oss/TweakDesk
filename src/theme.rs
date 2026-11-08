@@ -22,6 +22,14 @@ pub const ERR: Color32 = Color32::from_rgb(0xBC, 0x3C, 0x58);
 pub const SCAN: Color32 = Color32::from_rgb(0x9B, 0xBF, 0xF4);
 pub const DOWNLOAD: Color32 = Color32::from_rgb(0x9C, 0xDD, 0xC1);
 pub const INSTALL: Color32 = Color32::from_rgb(0xF6, 0xBF, 0x9C);
+/// Colori delle schede in alto: pastello, tutti diversi e mai bianchi.
+pub const TAB_BLUE: Color32 = Color32::from_rgb(0x9B, 0xBF, 0xF4);
+pub const TAB_MINT: Color32 = Color32::from_rgb(0x9C, 0xDD, 0xC1);
+pub const TAB_YELLOW: Color32 = Color32::from_rgb(0xF3, 0xE0, 0x9A);
+pub const TAB_PEACH: Color32 = Color32::from_rgb(0xF6, 0xBF, 0x9C);
+pub const TAB_LILAC: Color32 = Color32::from_rgb(0xCF, 0xBF, 0xF0);
+pub const TAB_AQUA: Color32 = Color32::from_rgb(0x9F, 0xDD, 0xE6);
+pub const TAB_PINK: Color32 = Color32::from_rgb(0xF2, 0xBB, 0xD0);
 /// Testo sui pulsanti pastello: blu notte.
 pub const ON_COLOR: Color32 = Color32::from_rgb(0x1B, 0x28, 0x55);
 pub const LOG_BG: Color32 = Color32::from_rgb(0x34, 0x41, 0x72);

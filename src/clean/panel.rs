@@ -22,7 +22,7 @@ enum Event {
 }
 
 #[derive(Clone, Copy, PartialEq)]
-enum Tab {
+pub enum Tab {
     Clean,
     Startup,
     Backup,
@@ -54,6 +54,10 @@ fn default_image() -> String {
 }
 
 impl CleanPanel {
+    pub fn set_tab(&mut self, t: Tab) {
+        self.tab = t;
+    }
+
     pub fn new() -> Self {
         let (tx, rx) = channel();
         let drive = std::env::var("SystemDrive").unwrap_or_else(|_| "C:".into());
@@ -303,18 +307,17 @@ impl CleanPanel {
         egui::Panel::top("clean_top").show(ui, |ui| {
             ui.add_space(6.0);
             ui.horizontal(|ui| {
-                ui.selectable_value(&mut self.tab, Tab::Clean, "Pulizia");
-                ui.selectable_value(&mut self.tab, Tab::Startup, "Avvio automatico");
-                ui.selectable_value(
-                    &mut self.tab,
-                    Tab::Backup,
-                    "Backup di sistema (install.wim)",
-                );
+                if self.tab != Tab::Backup {
+                    ui.selectable_value(&mut self.tab, Tab::Clean, "Pulizia");
+                    ui.selectable_value(&mut self.tab, Tab::Startup, "Avvio automatico");
+                }
                 if self.busy {
                     ui.spinner();
                 }
                 if !self.is_admin {
-                    ui.separator();
+                    if self.tab != Tab::Backup {
+                        ui.separator();
+                    }
                     ui.label(
                         RichText::new("Non sei amministratore: alcune voci verranno saltate.")
                             .color(theme::WARN),
