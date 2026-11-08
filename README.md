@@ -49,3 +49,7 @@ Scheda **Debloat e ottimizzazione**, con due sottoschede:
 Tre livelli: **Sicuro**, **Standard** (include il Sicuro) ed **Estremo** (tutto, anche Edge, Store, Defender e aggiornamenti: ogni voce rischiosa ha il suo avviso e si spunta a mano). .NET Framework non è mai rimovibile.
 
 Servono i permessi di amministratore. Provare sempre prima in una macchina virtuale.
+
+- **Cartella di lavoro sicura**: se il percorso scelto ha spazi, accenti o è troppo lungo, TweakDesk usa `X:\TDwork` sullo stesso disco e controlla lo spazio libero.
+- **Aggiornamenti nella ISO**: puoi aggiungere file `.msu`/`.cab` (dal Catalogo di Microsoft Update); vengono integrati in ogni edizione con DISM prima delle voci scelte.
+- **ISO da UUP dump**: indichi lo zip scaricato da uupdump.net, TweakDesk lo estrae in una cartella corta ed esegue lo script; la ISO prodotta diventa quella di partenza.

@@ -7,6 +7,7 @@ use crate::debloat::catalog::{items_for, Group, Item, Level};
 use crate::debloat::iso::{self, Compression, Edition, IsoMethod, Plan};
 use crate::debloat::target::Target;
 use crate::debloat::unattend;
+use crate::debloat::uup;
 use crate::install::config::app_dir;
 use crate::theme;
 use eframe::egui::{self, Color32, RichText};
@@ -18,6 +19,7 @@ enum Event {
     Log(Kind, String),
     Editions(Result<Vec<Edition>, String>),
     Oscdimg(PathBuf),
+    IsoIn(PathBuf),
     Finished,
 }
 
@@ -63,6 +65,8 @@ pub struct DebloatPanel {
     method: IsoMethod,
     editions: Vec<(Edition, bool)>,
     compression: Compression,
+    updates: Vec<String>,
+    uup_zip: String,
     boot_clean: bool,
     boot_bypass: bool,
     boot_setup_only: bool,
@@ -100,6 +104,8 @@ impl DebloatPanel {
             method: IsoMethod::Imapi,
             editions: Vec::new(),
             compression: Compression::Max,
+            updates: Vec::new(),
+            uup_zip: String::new(),
             boot_clean: true,
             boot_bypass: true,
             boot_setup_only: true,
@@ -143,6 +149,7 @@ impl DebloatPanel {
                         format!("Lettura della ISO non riuscita: {e}"),
                     ),
                 },
+                Event::IsoIn(p) => self.iso_in = p.to_string_lossy().to_string(),
                 Event::Oscdimg(p) => self.oscdimg = p.to_string_lossy().to_string(),
                 Event::Finished => self.busy = false,
             }
@@ -246,6 +253,25 @@ impl DebloatPanel {
         });
     }
 
+    fn run_uup(&mut self, ctx: &egui::Context) {
+        let zip = PathBuf::from(self.uup_zip.trim());
+        let base = PathBuf::from(self.work.trim());
+        self.say(theme::LOG_INFO, "Avvio UUP dump…");
+        self.spawn(ctx, move |tx| {
+            let t2 = tx.clone();
+            match uup::run(&RealSys, &zip, &base, &mut |k, m| {
+                let _ = t2.send(Event::Log(k, m.to_string()));
+            }) {
+                Ok(p) => {
+                    let _ = tx.send(Event::IsoIn(p));
+                }
+                Err(e) => {
+                    let _ = tx.send(Event::Log(Kind::Err, format!("UUP dump: {e}")));
+                }
+            }
+        });
+    }
+
     fn read_editions(&mut self, ctx: &egui::Context) {
         let path = PathBuf::from(self.iso_in.trim());
         if !path.is_file() {
@@ -274,6 +300,7 @@ impl DebloatPanel {
                 .map(|i| i.id.to_string())
                 .collect(),
             compression: self.compression,
+            updates: self.updates.iter().map(PathBuf::from).collect(),
             boot_clean: self.boot_clean,
             boot_bypass: self.boot_bypass,
             boot_setup_only: self.boot_setup_only,
@@ -480,6 +507,61 @@ impl DebloatPanel {
                     ui.label(RichText::new("Servono i permessi di amministratore.").color(theme::WARN));
                 }
             });
+            ui.label(RichText::new("Se la cartella di lavoro ha spazi, accenti o è lunga, uso automaticamente una cartella corta (es. C:\\TDwork).").color(theme::MUTED));
+            ui.add_space(6.0);
+            egui::CollapsingHeader::new(RichText::new("ISO da UUP dump (ultima versione con gli aggiornamenti)").strong().size(16.0))
+                .default_open(false)
+                .show(ui, |ui| {
+                    ui.label(RichText::new("Su uupdump.net scegli la versione e «Scarica e converti in ISO», con «Includi aggiornamenti»; poi indica qui lo zip scaricato.").color(theme::MUTED));
+                    egui::Grid::new("uup_grid").num_columns(1).show(ui, |ui| {
+                        Self::path_row(ui, "Zip di UUP dump:", &mut self.uup_zip, || {
+                            rfd::FileDialog::new().add_filter("zip", &["zip"]).pick_file()
+                        });
+                    });
+                    ui.horizontal(|ui| {
+                        if ui
+                            .add_enabled(!self.busy && self.is_admin, egui::Button::new(RichText::new("Crea la ISO con UUP dump").strong()).fill(theme::DOWNLOAD))
+                            .clicked()
+                        {
+                            self.run_uup(ctx);
+                        }
+                        if ui.button("Apri uupdump.net").clicked() {
+                            let _ = RealSys.run("cmd", &["/c", "start", "", "https://uupdump.net"]);
+                        }
+                    });
+                });
+            egui::CollapsingHeader::new(RichText::new("Aggiornamenti da integrare (.msu / .cab)").strong().size(16.0))
+                .default_open(false)
+                .show(ui, |ui| {
+                    ui.label(RichText::new("Vengono integrati in ogni edizione prima delle voci scelte. Se un aggiornamento fallisce, la creazione si ferma.").color(theme::MUTED));
+                    ui.horizontal(|ui| {
+                        if ui.button("Aggiungi file…").clicked() {
+                            if let Some(files) = rfd::FileDialog::new().add_filter("Aggiornamenti", &["msu", "cab"]).pick_files() {
+                                for f in files {
+                                    let s = f.to_string_lossy().to_string();
+                                    if !self.updates.contains(&s) {
+                                        self.updates.push(s);
+                                    }
+                                }
+                            }
+                        }
+                        if ui.button("Apri il Catalogo di Microsoft Update").clicked() {
+                            let _ = RealSys.run("cmd", &["/c", "start", "", "https://www.catalog.update.microsoft.com"]);
+                        }
+                    });
+                    let mut remove = None;
+                    for (i, u) in self.updates.iter().enumerate() {
+                        ui.horizontal(|ui| {
+                            if ui.small_button("Togli").clicked() {
+                                remove = Some(i);
+                            }
+                            ui.label(u);
+                        });
+                    }
+                    if let Some(i) = remove {
+                        self.updates.remove(i);
+                    }
+                });
             ui.add_space(6.0);
             ui.horizontal(|ui| {
                 if ui.add_enabled(!self.busy, egui::Button::new("Leggi le edizioni della ISO")).clicked() {

@@ -4,5 +4,7 @@ pub mod apply;
 pub mod catalog;
 pub mod iso;
 pub mod panel;
+pub mod paths;
 pub mod target;
 pub mod unattend;
+pub mod uup;

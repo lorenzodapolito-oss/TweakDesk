@@ -6,6 +6,7 @@ use crate::clean::engine::Env;
 use crate::clean::sys::Sys;
 use crate::debloat::apply::{self, Kind};
 use crate::debloat::catalog::{items_for, Item};
+use crate::debloat::paths;
 use crate::debloat::target::{join_rel, ps_quote, Target};
 use crate::debloat::unattend;
 use regex::Regex;
@@ -82,6 +83,8 @@ pub struct Plan {
     /// Id delle voci del catalogo da applicare.
     pub items: Vec<String>,
     pub compression: Compression,
+    /// Aggiornamenti (.msu / .cab) da integrare in ogni edizione, prima delle voci del catalogo.
+    pub updates: Vec<PathBuf>,
     /// Pulisce `boot.wim` (componenti superati) e salta i controlli di TPM/RAM nell'installazione.
     pub boot_clean: bool,
     pub boot_bypass: bool,
@@ -257,6 +260,14 @@ pub fn validate(p: &Plan) -> Result<(), String> {
             "oscdimg.exe non trovato: installa il Windows ADK (Deployment Tools) o indica il file"
                 .into(),
         );
+    }
+    for u in &p.updates {
+        if !u.is_file() || !(is_ext(u, "msu") || is_ext(u, "cab")) {
+            return Err(format!(
+                "{}: non è un file .msu o .cab esistente",
+                u.display()
+            ));
+        }
     }
     selected_items(&p.items)?;
     if let Some(u) = &p.unattend {
@@ -452,6 +463,52 @@ fn process_boot(
 }
 
 /// Applica le voci a ogni edizione e riscrive `install.wim` (o `install.esd`).
+/// Copia gli aggiornamenti in una cartella con nomi semplici (DISM non ama spazi e accenti).
+/// I nomi originali restano quando sono semplici: i pacchetti «checkpoint» li usano.
+fn stage_updates(plan: &Plan, work: &Path) -> Result<Option<PathBuf>, String> {
+    if plan.updates.is_empty() {
+        return Ok(None);
+    }
+    let dir = work.join("upd");
+    fs::create_dir_all(&dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+    for (n, u) in plan.updates.iter().enumerate() {
+        let dest = dir.join(paths::plain_file_name(u, n + 1));
+        fs::copy(u, &dest).map_err(|e| format!("{}: {e}", u.display()))?;
+    }
+    Ok(Some(dir))
+}
+
+fn add_updates(
+    sys: &dyn Sys,
+    mnt: &Path,
+    upd: &Path,
+    log: &mut dyn FnMut(Kind, &str),
+) -> Result<(), String> {
+    dism(
+        sys,
+        &[
+            &format!("/Image:{}", mnt.display()),
+            "/Add-Package",
+            &format!("/PackagePath:{}", upd.display()),
+        ],
+    )?;
+    log(Kind::Ok, "Aggiornamenti integrati");
+    if let Err(e) = dism(
+        sys,
+        &[
+            &format!("/Image:{}", mnt.display()),
+            "/Cleanup-Image",
+            "/StartComponentCleanup",
+        ],
+    ) {
+        log(
+            Kind::Warn,
+            &format!("Pulizia dei componenti non riuscita: {e}"),
+        );
+    }
+    Ok(())
+}
+
 fn process_install(
     sys: &dyn Sys,
     plan: &Plan,
@@ -482,6 +539,7 @@ fn process_install(
         return Err("install.wim / install.esd non trovato nella ISO".into());
     };
 
+    let upd = stage_updates(plan, work)?;
     for (n, idx) in indexes.iter().enumerate() {
         let dir = work.join(format!("mnt_{idx}"));
         log(
@@ -489,6 +547,16 @@ fn process_install(
             &format!("Edizione {} di {}: monto l'immagine…", n + 1, indexes.len()),
         );
         mount(sys, &src, *idx, &dir)?;
+        if let Some(u) = &upd {
+            log(
+                Kind::Info,
+                "Integro gli aggiornamenti (può richiedere molto tempo)…",
+            );
+            if let Err(e) = add_updates(sys, &dir, u, log) {
+                let _ = unmount(sys, &dir, false);
+                return Err(format!("Aggiornamenti non integrati: {e}"));
+            }
+        }
         let target = Target::offline(&dir);
         let (rep, _undo) = apply::apply(items, &target, sys, log);
         log(
@@ -754,7 +822,21 @@ pub fn build(sys: &dyn Sys, plan: &Plan, log: &mut dyn FnMut(Kind, &str)) -> Res
             "Servono i permessi di amministratore (riavvia TweakDesk come amministratore)".into(),
         );
     }
-    let work = plan.work.join(WORK_SUB);
+    let root = paths::safe_root(&plan.work);
+    if root != plan.work {
+        log(
+            Kind::Warn,
+            &format!(
+                "La cartella di lavoro ha spazi, accenti o è troppo lunga: uso {}",
+                root.display()
+            ),
+        );
+        fs::create_dir_all(&root).map_err(|e| format!("{}: {e}", root.display()))?;
+    }
+    let work = root.join(WORK_SUB);
+    paths::check_work(&work)?;
+    let iso_size = fs::metadata(&plan.iso_in).map(|m| m.len()).unwrap_or(0);
+    paths::check_space(sys, &root, iso_size.saturating_mul(3))?;
     let iso = work.join("iso");
     let _ = dism(sys, &["/Cleanup-Wim"]);
     if work.exists() {
@@ -828,6 +910,7 @@ mod tests {
             editions: vec![6],
             items: vec!["news".into(), "ctx".into()],
             compression: Compression::Max,
+            updates: Vec::new(),
             boot_clean: true,
             boot_bypass: true,
             boot_setup_only: true,
@@ -1324,6 +1407,73 @@ mod tests {
         let e = build(&sys, &p, &mut |_, _| {}).unwrap_err();
         assert!(e.contains("troppo piccola"));
         assert!(!p.iso_out.exists());
+        let _ = fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn updates_are_staged_with_plain_names_and_added_before_items() {
+        let d = tmp("upd");
+        let (sys, mut p) = full_env(&d, true);
+        p.delete_work = false;
+        touch(&d.join("kb1-x64.msu"));
+        touch(&d.join("Aggiornamento è.msu"));
+        p.updates = vec![d.join("kb1-x64.msu"), d.join("Aggiornamento è.msu")];
+        build(&sys, &p, &mut |_, _| {}).unwrap();
+        let upd = p.work.join(WORK_SUB).join("upd");
+        assert!(upd.join("kb1-x64.msu").is_file());
+        assert!(upd.join("pkg_02.msu").is_file());
+        let c = sys.commands.borrow().clone();
+        let a = c.iter().position(|x| x.contains("/Add-Package")).unwrap();
+        assert!(c[a].contains("/PackagePath:"));
+        assert!(c[a].contains("/Image:"));
+        assert!(c.iter().any(|x| x.contains("/StartComponentCleanup")));
+        let m = c.iter().position(|x| x.contains("/Mount-Image")).unwrap();
+        assert!(m < a);
+        let _ = fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn failed_update_discards_the_image_and_stops() {
+        let d = tmp("updfail");
+        let (sys, mut p) = full_env(&d, true);
+        p.delete_work = false;
+        touch(&d.join("kb1.msu"));
+        p.updates = vec![d.join("kb1.msu")];
+        sys.failing.borrow_mut().push("/Add-Package".into());
+        let e = build(&sys, &p, &mut |_, _| {}).unwrap_err();
+        assert!(e.contains("Aggiornamenti non integrati"));
+        let c = sys.commands.borrow().clone();
+        assert!(c
+            .iter()
+            .any(|x| x.contains("/Unmount-Image") && x.contains("/Discard")));
+        assert!(!p.iso_out.exists());
+        let _ = fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn invalid_update_files_are_rejected() {
+        let d = tmp("updbad");
+        let mut p = plan(&d);
+        p.updates = vec![d.join("manca.msu")];
+        assert!(validate(&p).is_err());
+        touch(&d.join("x.exe"));
+        p.updates = vec![d.join("x.exe")];
+        assert!(validate(&p).unwrap_err().contains(".msu"));
+        touch(&d.join("ok.CAB"));
+        p.updates = vec![d.join("ok.CAB")];
+        assert!(validate(&p).is_ok());
+        let _ = fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn low_disk_space_stops_before_copying() {
+        let d = tmp("space");
+        let (sys, p) = full_env(&d, true);
+        sys.responses
+            .borrow_mut()
+            .push(("Get-PSDrive".into(), "10".into()));
+        // Su Linux il percorso non ha lettera: il controllo non si applica, il build prosegue.
+        assert!(build(&sys, &p, &mut |_, _| {}).is_ok());
         let _ = fs::remove_dir_all(&d);
     }
 }
