@@ -1,6 +1,7 @@
 //! Finestra principale di TweakDesk: schede colorate in alto.
 
 use crate::clean::panel::{CleanPanel, Tab as CleanTab};
+use crate::debloat::panel::DebloatPanel;
 use crate::install::app::{InstallPanel, Tab as InstallTab};
 use crate::theme;
 use crate::tweak_panel::TweakPanel;
@@ -45,6 +46,7 @@ pub struct App {
     tweak: TweakPanel,
     install: InstallPanel,
     clean: CleanPanel,
+    debloat: DebloatPanel,
 }
 
 impl App {
@@ -55,6 +57,7 @@ impl App {
             tweak: TweakPanel::new(open),
             install: InstallPanel::new(),
             clean: CleanPanel::new(),
+            debloat: DebloatPanel::new(),
         }
     }
 
@@ -92,22 +95,6 @@ fn tab_button(ui: &mut egui::Ui, text: &str, color: Color32, selected: bool) -> 
     ui.add(b).clicked()
 }
 
-fn debloat_placeholder(ui: &mut egui::Ui) {
-    egui::CentralPanel::default().show(ui, |ui| {
-        ui.add_space(40.0);
-        ui.vertical_centered(|ui| {
-            ui.label(RichText::new("Debloat e ottimizzazione").size(22.0).strong());
-            ui.add_space(6.0);
-            ui.label(
-                RichText::new(
-                    "Sezione in preparazione: rimozione delle app preinstallate e ottimizzazione,\nsia su Windows già installato sia su una ISO di Windows 11.",
-                )
-                .color(theme::MUTED),
-            );
-        });
-    });
-}
-
 impl eframe::App for App {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         egui::Panel::top("sections").show(ui, |ui| {
@@ -134,7 +121,7 @@ impl eframe::App for App {
             Section::Settings => self.tweak.show(ui),
             Section::Programs | Section::Extensions | Section::Config => self.install.show(ui),
             Section::Clean | Section::Backup => self.clean.show(ui),
-            Section::Debloat => debloat_placeholder(ui),
+            Section::Debloat => self.debloat.show(ui),
         }
     }
 }

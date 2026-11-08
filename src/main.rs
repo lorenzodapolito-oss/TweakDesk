@@ -4,6 +4,7 @@
 mod app;
 mod catalog;
 mod clean;
+mod debloat;
 mod engine;
 mod install;
 mod model;

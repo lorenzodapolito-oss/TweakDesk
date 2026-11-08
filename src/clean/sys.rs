@@ -110,6 +110,9 @@ pub mod fake {
         pub responses: RefCell<Vec<(String, String)>>,
         /// Comandi che devono fallire (testo contenuto).
         pub failing: RefCell<Vec<String>>,
+        /// (testo contenuto nel comando, azione eseguita con il comando intero)
+        #[allow(clippy::type_complexity)]
+        pub hooks: RefCell<Vec<(String, Box<dyn Fn(&str)>)>>,
     }
 
     impl FakeSys {
@@ -162,6 +165,11 @@ pub mod fake {
                 .borrow_mut()
                 .push(format!("{program} {}", args.join(" ")));
             let line = format!("{program} {}", args.join(" "));
+            for (k, h) in self.hooks.borrow().iter() {
+                if line.contains(k.as_str()) {
+                    h(&line);
+                }
+            }
             if *self.fail_run.borrow() || self.failing.borrow().iter().any(|f| line.contains(f)) {
                 return Err("errore simulato".into());
             }

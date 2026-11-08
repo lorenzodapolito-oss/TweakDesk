@@ -38,3 +38,14 @@ Terza sezione, **Pulizia e avvio**:
 - **Backup di sistema (install.wim)**: crea una copia ombra (VSS) del disco e la salva con `dism /Capture-Image` in un file `.wim` (come Dism++). Non sovrascrive file esistenti; esclude pagefile, hiberfil e il file stesso.
 
 Sicurezza: ogni percorso viene espanso da variabili d'ambiente (se mancano, la voce è saltata), `..` e radici dei dischi sono rifiutati, i collegamenti simbolici non vengono seguiti, e i file in uso vengono saltati senza errori. Le voci che richiedono l'amministratore sono segnate e saltate se non lo sei.
+
+## Debloat e ottimizzazione
+
+Scheda **Debloat e ottimizzazione**, con due sottoschede:
+
+- **Windows installato**: applica le voci scelte al sistema in uso. «Annulla» ripristina registro e servizi; app, funzionalità e file tolti non si recuperano. Non crea punti di ripristino.
+- **ISO di Windows 11**: copia la ISO, applica le voci a ogni edizione scelta, pulisce `boot.wim`, sceglie la compressione (WIM o ESD), aggiunge `autounattend.xml` (account locale, lingua, salto dei controlli TPM/RAM, schermate iniziali, Compact OS) e ricrea la ISO avviabile con `oscdimg` (Windows ADK, Deployment Tools). Non integra driver.
+
+Tre livelli: **Sicuro**, **Standard** (include il Sicuro) ed **Estremo** (tutto, anche Edge, Store, Defender e aggiornamenti: ogni voce rischiosa ha il suo avviso e si spunta a mano). .NET Framework non è mai rimovibile.
+
+Servono i permessi di amministratore. Provare sempre prima in una macchina virtuale.
