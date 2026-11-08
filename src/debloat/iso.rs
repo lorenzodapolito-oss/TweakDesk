@@ -46,6 +46,25 @@ impl Compression {
     }
 }
 
+/// Come si crea il file .iso finale.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum IsoMethod {
+    /// Strumento già dentro Windows (IMAPI): niente da scaricare.
+    Imapi,
+    /// `oscdimg.exe` del Windows ADK.
+    Oscdimg,
+}
+
+impl IsoMethod {
+    pub const ALL: [IsoMethod; 2] = [IsoMethod::Imapi, IsoMethod::Oscdimg];
+    pub fn label(self) -> &'static str {
+        match self {
+            IsoMethod::Imapi => "Strumento di Windows (IMAPI, senza ADK)",
+            IsoMethod::Oscdimg => "oscdimg del Windows ADK",
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Edition {
     pub index: u32,
@@ -73,6 +92,8 @@ pub struct Plan {
     pub keep_langs: Vec<String>,
     pub compact_registry: bool,
     pub unattend: Option<unattend::Options>,
+    pub method: IsoMethod,
+    /// Serve solo con `IsoMethod::Oscdimg` e come ripiego se IMAPI non riesce.
     pub oscdimg: PathBuf,
     /// Cancella la cartella di lavoro alla fine.
     pub delete_work: bool,
@@ -588,34 +609,141 @@ pub fn process(
     Ok(())
 }
 
-fn build_iso_file(sys: &dyn Sys, plan: &Plan, iso: &Path) -> Result<(), String> {
-    let efi_nop = iso
-        .join("efi")
-        .join("microsoft")
-        .join("boot")
-        .join("efisys_noprompt.bin");
-    let efi = if efi_nop.is_file() {
-        "efi\\microsoft\\boot\\efisys_noprompt.bin"
-    } else {
-        "efi\\microsoft\\boot\\efisys.bin"
-    };
-    let boot = format!("-bootdata:2#p0,e,bboot\\etfsboot.com#pEF,e,b{efi}");
-    let label = drive_label(
+/// Codice C# che scrive il risultato di IMAPI su file (senza `unsafe`).
+const IMAPI_CS: &str = "using System; using System.IO; using System.Runtime.InteropServices; using System.Runtime.InteropServices.ComTypes;\n\
+public static class TdIso {\n\
+  public static void Create(string path, object stream, int blockSize, int totalBlocks) {\n\
+    IStream s = (IStream)stream; byte[] buf = new byte[blockSize]; IntPtr pcb = Marshal.AllocHGlobal(4);\n\
+    try { using (FileStream o = File.Create(path)) { while (totalBlocks-- > 0) { s.Read(buf, blockSize, pcb); int n = Marshal.ReadInt32(pcb); o.Write(buf, 0, n); } } }\n\
+    finally { Marshal.FreeHGlobal(pcb); }\n\
+  }\n\
+}";
+
+/// Script PowerShell che crea la ISO (UDF 1.02, avvio BIOS ed EFI) con IMAPI.
+pub fn imapi_script(iso: &Path, out: &Path, label: &str, bios: &Path, efi: &Path) -> String {
+    format!(
+        "$ErrorActionPreference = 'Stop'\n\
+Add-Type -TypeDefinition @'\n{IMAPI_CS}\n'@\n\
+function New-Boot($file, $platform) {{\n\
+  $st = New-Object -ComObject ADODB.Stream; $st.Open(); $st.Type = 1; $st.LoadFromFile($file)\n\
+  $b = New-Object -ComObject IMAPI2FS.BootOptions; $b.PlatformId = $platform; $b.Emulation = 0; $b.AssignBootImage($st); $b\n\
+}}\n\
+$fsi = New-Object -ComObject IMAPI2FS.MsftFileSystemImage\n\
+$fsi.FileSystemsToCreate = 4\n\
+$fsi.UDFRevision = 258\n\
+$fsi.FreeMediaBlocks = 0\n\
+$fsi.VolumeName = {label}\n\
+$fsi.BootImageOptionsArray = @((New-Boot {bios} 0), (New-Boot {efi} 239))\n\
+$fsi.Root.AddTree({iso}, $false)\n\
+$r = $fsi.CreateResultImage()\n\
+[TdIso]::Create({out}, $r.ImageStream, $r.BlockSize, $r.TotalBlocks)\n",
+        label = ps_quote(label),
+        bios = ps_quote(&bios.to_string_lossy()),
+        efi = ps_quote(&efi.to_string_lossy()),
+        iso = ps_quote(&iso.to_string_lossy()),
+        out = ps_quote(&out.to_string_lossy()),
+    )
+}
+
+fn iso_label(plan: &Plan) -> String {
+    drive_label(
         &plan
             .iso_out
             .file_stem()
             .map(|s| s.to_string_lossy().to_string())
             .unwrap_or_default(),
-    );
+    )
+}
+
+fn efi_file(iso: &Path) -> PathBuf {
+    let dir = join_rel(iso, "efi\\microsoft\\boot");
+    let nop = dir.join("efisys_noprompt.bin");
+    if nop.is_file() {
+        nop
+    } else {
+        dir.join("efisys.bin")
+    }
+}
+
+fn build_with_imapi(sys: &dyn Sys, plan: &Plan, iso: &Path) -> Result<(), String> {
+    let bios = join_rel(iso, "boot\\etfsboot.com");
+    let efi = efi_file(iso);
+    for f in [&bios, &efi] {
+        if !f.is_file() {
+            return Err(format!("File di avvio mancante nella ISO: {}", f.display()));
+        }
+    }
+    let script = imapi_script(iso, &plan.iso_out, &iso_label(plan), &bios, &efi);
+    ps(sys, &script).map(|_| ())
+}
+
+fn build_with_oscdimg(sys: &dyn Sys, plan: &Plan, iso: &Path) -> Result<(), String> {
+    let efi_rel = if efi_file(iso).ends_with("efisys_noprompt.bin") {
+        "efi\\microsoft\\boot\\efisys_noprompt.bin"
+    } else {
+        "efi\\microsoft\\boot\\efisys.bin"
+    };
+    let boot = format!("-bootdata:2#p0,e,bboot\\etfsboot.com#pEF,e,b{efi_rel}");
     let script = format!(
         "Set-Location -LiteralPath {}; & {} -m -o -u2 -udfver102 {} {} . {}; if ($LASTEXITCODE -ne 0) {{ exit 1 }}",
         ps_quote(&iso.to_string_lossy()),
         ps_quote(&plan.oscdimg.to_string_lossy()),
-        ps_quote(&format!("-l{label}")),
+        ps_quote(&format!("-l{}", iso_label(plan))),
         ps_quote(&boot),
         ps_quote(&plan.iso_out.to_string_lossy()),
     );
     ps(sys, &script).map(|_| ())
+}
+
+fn largest_file_in(dir: &Path) -> u64 {
+    fs::read_dir(dir)
+        .map(|rd| {
+            rd.flatten()
+                .filter_map(|e| e.metadata().ok())
+                .filter(|m| m.is_file())
+                .map(|m| m.len())
+                .max()
+                .unwrap_or(0)
+        })
+        .unwrap_or(0)
+}
+
+/// Crea il file .iso con il metodo scelto; se IMAPI non riesce, prova oscdimg quando c'è.
+fn build_iso_file(
+    sys: &dyn Sys,
+    plan: &Plan,
+    iso: &Path,
+    log: &mut dyn FnMut(Kind, &str),
+) -> Result<(), String> {
+    let first = match plan.method {
+        IsoMethod::Imapi => build_with_imapi(sys, plan, iso),
+        IsoMethod::Oscdimg => build_with_oscdimg(sys, plan, iso),
+    };
+    let mut result = first;
+    if let (Err(e), IsoMethod::Imapi) = (&result, plan.method) {
+        if plan.oscdimg.is_file() {
+            log(
+                Kind::Warn,
+                &format!("IMAPI non è riuscito ({e}): provo con oscdimg"),
+            );
+            let _ = fs::remove_file(&plan.iso_out);
+            result = build_with_oscdimg(sys, plan, iso);
+        }
+    }
+    result?;
+    // Controllo: la ISO deve poter contenere almeno il file più grande (install.wim/esd).
+    let need = largest_file_in(&iso.join("sources"));
+    let got = fs::metadata(&plan.iso_out).map(|m| m.len()).unwrap_or(0);
+    if got == 0 {
+        return Err("La ISO non è stata creata".into());
+    }
+    if got < need {
+        let _ = fs::remove_file(&plan.iso_out);
+        return Err(format!(
+            "La ISO creata è troppo piccola ({got} byte, serviva almeno {need}): file troncato, non la tengo"
+        ));
+    }
+    Ok(())
 }
 
 /// Esegue tutto. `log` riceve i passaggi.
@@ -663,10 +791,7 @@ pub fn build(sys: &dyn Sys, plan: &Plan, log: &mut dyn FnMut(Kind, &str)) -> Res
         return Err(e);
     }
     log(Kind::Info, "Creo la ISO avviabile…");
-    build_iso_file(sys, plan, &iso)?;
-    if !plan.iso_out.is_file() {
-        return Err("La ISO non è stata creata".into());
-    }
+    build_iso_file(sys, plan, &iso, log)?;
     if plan.delete_work {
         let _ = fs::remove_dir_all(&work);
     }
@@ -710,6 +835,7 @@ mod tests {
             keep_langs: vec!["it-it".into(), "en-us".into()],
             compact_registry: false,
             unattend: Some(unattend::Options::default()),
+            method: IsoMethod::Imapi,
             oscdimg: d.join("oscdimg.exe"),
             delete_work: true,
         }
@@ -759,7 +885,10 @@ mod tests {
         bad(&|p| p.iso_out = d.join("nuova/out.iso"));
         bad(&|p| p.work = d.join("non-esiste"));
         bad(&|p| p.editions.clear());
-        bad(&|p| p.oscdimg = d.join("no.exe"));
+        bad(&|p| {
+            p.method = IsoMethod::Oscdimg;
+            p.oscdimg = d.join("no.exe");
+        });
         bad(&|p| p.items = vec!["inventata".into()]);
         bad(&|p| p.items = vec!["power".into()]); // solo sistema installato
         bad(&|p| {
@@ -1054,10 +1183,11 @@ mod tests {
         sys.hooks.borrow_mut().push((
             "oscdimg".into(),
             Box::new(move |_| {
-                let _ = fs::write(&out, b"iso");
+                let _ = fs::write(&out, vec![0u8; 100_000]);
             }),
         ));
         let mut p2 = p.clone();
+        p2.method = IsoMethod::Oscdimg;
         p2.delete_work = false;
         build(&sys, &p2, &mut |_, _| {}).unwrap();
         let c = sys.commands.borrow().clone();
@@ -1072,6 +1202,128 @@ mod tests {
         assert!(osc.contains("-lout"));
         assert!(c.iter().any(|x| x.contains("Dismount-DiskImage")));
         assert!(p2.iso_out.is_file());
+        let _ = fs::remove_dir_all(&d);
+    }
+
+    fn full_env(d: &Path, hooks_iso: bool) -> (FakeSys, Plan) {
+        let p = plan(d);
+        let sys = FakeSys {
+            admin: true,
+            ..FakeSys::default()
+        };
+        sys.responses
+            .borrow_mut()
+            .push(("Mount-DiskImage".into(), "E\r\n".into()));
+        let wi = p.work.join(WORK_SUB).join("iso");
+        sys.hooks.borrow_mut().push((
+            "robocopy".into(),
+            Box::new(move |_| {
+                touch(&wi.join("sources/install.wim"));
+                touch(&wi.join("sources/boot.wim"));
+                touch(&wi.join("boot/etfsboot.com"));
+                touch(&wi.join("efi/microsoft/boot/efisys_noprompt.bin"));
+            }),
+        ));
+        hook_export(&sys);
+        if hooks_iso {
+            let out = p.iso_out.clone();
+            sys.hooks.borrow_mut().push((
+                "IMAPI2FS".into(),
+                Box::new(move |_| {
+                    let _ = fs::write(&out, b"iso-grande");
+                }),
+            ));
+        }
+        (sys, p)
+    }
+
+    #[test]
+    fn imapi_script_has_udf_and_both_boot_images() {
+        let s = imapi_script(
+            Path::new("C:\\w\\iso"),
+            Path::new("C:\\o.iso"),
+            "WIN11",
+            Path::new("C:\\w\\iso\\boot\\etfsboot.com"),
+            Path::new("C:\\w\\iso\\efi\\microsoft\\boot\\efisys_noprompt.bin"),
+        );
+        assert!(s.contains("IMAPI2FS.MsftFileSystemImage"));
+        assert!(s.contains("FileSystemsToCreate = 4"));
+        assert!(s.contains("UDFRevision = 258"));
+        assert!(s.contains("etfsboot.com' 0") && s.contains("efisys_noprompt.bin' 239"));
+        assert!(s.contains("AddTree('C:\\w\\iso', $false)"));
+        assert!(s.contains("[TdIso]::Create('C:\\o.iso'"));
+        assert!(!s.contains("unsafe"));
+    }
+
+    #[test]
+    fn imapi_build_is_the_default_path() {
+        let d = tmp("imapi");
+        let (sys, mut p) = full_env(&d, true);
+        p.delete_work = false;
+        build(&sys, &p, &mut |_, _| {}).unwrap();
+        let c = sys.commands.borrow().clone();
+        assert!(c.iter().any(|x| x.contains("IMAPI2FS.MsftFileSystemImage")));
+        assert!(!c.iter().any(|x| x.contains("oscdimg")));
+        assert!(p.iso_out.is_file());
+        let _ = fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn imapi_failure_falls_back_to_oscdimg() {
+        let d = tmp("fallback");
+        let (sys, mut p) = full_env(&d, false);
+        p.delete_work = false;
+        sys.failing.borrow_mut().push("IMAPI2FS".into());
+        let out = p.iso_out.clone();
+        sys.hooks.borrow_mut().push((
+            "oscdimg".into(),
+            Box::new(move |_| {
+                let _ = fs::write(&out, b"iso-grande");
+            }),
+        ));
+        let mut log = Vec::new();
+        build(&sys, &p, &mut |k, m| log.push((k, m.to_string()))).unwrap();
+        assert!(log
+            .iter()
+            .any(|(k, m)| *k == Kind::Warn && m.contains("provo con oscdimg")));
+        assert!(sys.commands.borrow().iter().any(|x| x.contains("oscdimg")));
+        let _ = fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn imapi_failure_without_oscdimg_is_an_error() {
+        let d = tmp("nofallback");
+        let (sys, mut p) = full_env(&d, false);
+        p.delete_work = false;
+        let _ = fs::remove_file(&p.oscdimg);
+        sys.failing.borrow_mut().push("IMAPI2FS".into());
+        assert!(build(&sys, &p, &mut |_, _| {}).is_err());
+        let _ = fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn truncated_iso_is_rejected_and_removed() {
+        let d = tmp("small");
+        let (sys, mut p) = full_env(&d, false);
+        p.delete_work = false;
+        // install.wim finto più grande della ISO prodotta.
+        let out = p.iso_out.clone();
+        let wi = p
+            .work
+            .join(WORK_SUB)
+            .join("iso")
+            .join("sources")
+            .join("install.wim");
+        sys.hooks.borrow_mut().push((
+            "IMAPI2FS".into(),
+            Box::new(move |_| {
+                let _ = fs::write(&wi, vec![0u8; 5000]);
+                let _ = fs::write(&out, b"x");
+            }),
+        ));
+        let e = build(&sys, &p, &mut |_, _| {}).unwrap_err();
+        assert!(e.contains("troppo piccola"));
+        assert!(!p.iso_out.exists());
         let _ = fs::remove_dir_all(&d);
     }
 }

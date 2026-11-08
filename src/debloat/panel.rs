@@ -4,7 +4,7 @@ use crate::clean::engine::RealEnv;
 use crate::clean::sys::{RealSys, Sys};
 use crate::debloat::apply::{self, Kind};
 use crate::debloat::catalog::{items_for, Group, Item, Level};
-use crate::debloat::iso::{self, Compression, Edition, Plan};
+use crate::debloat::iso::{self, Compression, Edition, IsoMethod, Plan};
 use crate::debloat::target::Target;
 use crate::debloat::unattend;
 use crate::install::config::app_dir;
@@ -60,6 +60,7 @@ pub struct DebloatPanel {
     iso_out: String,
     work: String,
     oscdimg: String,
+    method: IsoMethod,
     editions: Vec<(Edition, bool)>,
     compression: Compression,
     boot_clean: bool,
@@ -96,6 +97,7 @@ impl DebloatPanel {
                 .to_string(),
             work: base.to_string_lossy().to_string(),
             oscdimg,
+            method: IsoMethod::Imapi,
             editions: Vec::new(),
             compression: Compression::Max,
             boot_clean: true,
@@ -279,6 +281,7 @@ impl DebloatPanel {
             keep_langs: vec![self.un.language.clone(), "en-US".into()],
             compact_registry: self.compact_registry,
             unattend: self.use_unattend.then(|| self.un.clone()),
+            method: self.method,
             oscdimg: PathBuf::from(self.oscdimg.trim()),
             delete_work: self.delete_work,
         }
@@ -445,11 +448,21 @@ impl DebloatPanel {
                 Self::path_row(ui, "Cartella di lavoro (serve spazio per circa 3 volte la ISO):", &mut self.work, || {
                     rfd::FileDialog::new().pick_folder()
                 });
-                Self::path_row(ui, "oscdimg.exe (Windows ADK, Deployment Tools):", &mut self.oscdimg, || {
+                ui.horizontal(|ui| {
+                    ui.label("Metodo per creare la ISO:");
+                    egui::ComboBox::from_id_salt("iso_method")
+                        .selected_text(self.method.label())
+                        .show_ui(ui, |ui| {
+                            for m in IsoMethod::ALL {
+                                ui.selectable_value(&mut self.method, m, m.label());
+                            }
+                        });
+                });
+                Self::path_row(ui, "oscdimg.exe (solo per il metodo ADK o come ripiego se IMAPI non riesce):", &mut self.oscdimg, || {
                     rfd::FileDialog::new().add_filter("oscdimg", &["exe"]).pick_file()
                 });
             });
-            if self.oscdimg.trim().is_empty() {
+            if self.method == IsoMethod::Oscdimg && self.oscdimg.trim().is_empty() {
                 ui.label(RichText::new("oscdimg.exe non trovato: scarica e installa il Windows ADK (solo «Deployment Tools») con il pulsante, oppure indica il file.").color(theme::WARN));
             }
             ui.horizontal(|ui| {

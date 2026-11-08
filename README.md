@@ -44,7 +44,7 @@ Sicurezza: ogni percorso viene espanso da variabili d'ambiente (se mancano, la v
 Scheda **Debloat e ottimizzazione**, con due sottoschede:
 
 - **Windows installato**: applica le voci scelte al sistema in uso. «Annulla» ripristina registro e servizi; app, funzionalità e file tolti non si recuperano. Non crea punti di ripristino.
-- **ISO di Windows 11**: copia la ISO, applica le voci a ogni edizione scelta, pulisce `boot.wim`, sceglie la compressione (WIM o ESD), aggiunge `autounattend.xml` (account locale, lingua, salto dei controlli TPM/RAM, schermate iniziali, Compact OS) e ricrea la ISO avviabile con `oscdimg` (Windows ADK, Deployment Tools). Non integra driver.
+- **ISO di Windows 11**: copia la ISO, applica le voci a ogni edizione scelta, pulisce `boot.wim`, sceglie la compressione (WIM o ESD), aggiunge `autounattend.xml` (account locale, lingua, salto dei controlli TPM/RAM, schermate iniziali, Compact OS) e ricrea la ISO avviabile (BIOS + UEFI) con lo strumento già presente in Windows (IMAPI), senza scaricare nulla. Se IMAPI non riesce, ripiega su `oscdimg` del Windows ADK (c’è il pulsante per scaricarlo e installarlo). Non integra driver.
 
 Tre livelli: **Sicuro**, **Standard** (include il Sicuro) ed **Estremo** (tutto, anche Edge, Store, Defender e aggiornamenti: ogni voce rischiosa ha il suo avviso e si spunta a mano). .NET Framework non è mai rimovibile.
 
