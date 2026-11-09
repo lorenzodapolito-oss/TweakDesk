@@ -74,10 +74,10 @@ pub fn fix_hosts(path: &Path, log: &mut dyn FnMut(Kind, &str)) -> Result<usize, 
         Ok(b) => String::from_utf8_lossy(&b).to_string(),
         Err(_) => return Ok(0),
     };
-    let (clean, removed) = clean_hosts(&text);
-    if removed.is_empty() {
+    if problem_lines(&text).is_empty() {
         return Ok(0);
     }
+    let (clean, removed) = clean_hosts(&text);
     let bak = path.with_file_name("hosts.tweakdesk.bak");
     if !bak.exists() {
         fs::write(&bak, &text).map_err(|e| format!("Copia di sicurezza non riuscita: {e}"))?;
