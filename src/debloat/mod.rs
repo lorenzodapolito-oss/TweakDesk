@@ -3,6 +3,7 @@
 pub mod apply;
 pub mod catalog;
 pub mod iso;
+pub mod netfix;
 pub mod panel;
 pub mod paths;
 pub mod target;

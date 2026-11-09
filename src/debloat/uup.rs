@@ -3,6 +3,7 @@
 
 use crate::clean::sys::Sys;
 use crate::debloat::apply::Kind;
+use crate::debloat::netfix;
 use crate::debloat::paths;
 use crate::debloat::target::ps_quote;
 use std::fs;
@@ -58,6 +59,7 @@ pub fn run(
     sys: &dyn Sys,
     zip: &Path,
     base: &Path,
+    hosts: &Path,
     log: &mut dyn FnMut(Kind, &str),
 ) -> Result<PathBuf, String> {
     if !zip.is_file()
@@ -72,6 +74,8 @@ pub fn run(
             "Servono i permessi di amministratore (riavvia TweakDesk come amministratore)".into(),
         );
     }
+    log(Kind::Info, "Controllo la rete (file hosts e DNS)…");
+    netfix::preflight(sys, hosts, log)?;
     let root = paths::safe_root(base);
     if root != base {
         log(
@@ -103,6 +107,18 @@ pub fn run(
     let script = find_script(&dir).ok_or_else(|| {
         format!("Nello zip manca {SCRIPT}: scegli «Scarica e converti in ISO» su UUP dump")
     })?;
+    if let Ok(text) = fs::read_to_string(&script) {
+        let (patched, n) = netfix::patch_retries(&text);
+        if n > 0 && fs::write(&script, patched).is_ok() {
+            log(
+                Kind::Info,
+                &format!(
+                    "Script di UUP dump: limitati i tentativi a {} (di suo ripete all'infinito)",
+                    netfix::MAX_TRIES
+                ),
+            );
+        }
+    }
     let sdir = script.parent().map(Path::to_path_buf).unwrap_or(dir);
 
     log(
@@ -137,10 +153,18 @@ mod tests {
     }
 
     fn admin() -> FakeSys {
-        FakeSys {
+        let s = FakeSys {
             admin: true,
             ..FakeSys::default()
-        }
+        };
+        s.responses
+            .borrow_mut()
+            .push(("GetHostAddresses".into(), "92.223.124.62\r\n".into()));
+        s
+    }
+
+    fn no_hosts(d: &Path) -> PathBuf {
+        d.join("hosts_assente")
     }
 
     #[test]
@@ -160,10 +184,24 @@ mod tests {
     #[test]
     fn rejects_bad_zip_and_non_admin() {
         let d = tmp("bad");
-        let e = run(&admin(), &d.join("no.zip"), &d, &mut |_, _| {}).unwrap_err();
+        let e = run(
+            &admin(),
+            &d.join("no.zip"),
+            &d,
+            &no_hosts(&d),
+            &mut |_, _| {},
+        )
+        .unwrap_err();
         assert!(e.contains("zip"));
         fs::write(d.join("a.zip"), b"x").unwrap();
-        let e = run(&FakeSys::default(), &d.join("a.zip"), &d, &mut |_, _| {}).unwrap_err();
+        let e = run(
+            &FakeSys::default(),
+            &d.join("a.zip"),
+            &d,
+            &no_hosts(&d),
+            &mut |_, _| {},
+        )
+        .unwrap_err();
         assert!(e.contains("amministratore"));
         let _ = fs::remove_dir_all(&d);
     }
@@ -189,7 +227,7 @@ mod tests {
                 let _ = fs::write(d3.join("26200.iso"), b"iso");
             }),
         ));
-        let iso = run(&sys, &d.join("uup.zip"), &d, &mut |_, _| {}).unwrap();
+        let iso = run(&sys, &d.join("uup.zip"), &d, &no_hosts(&d), &mut |_, _| {}).unwrap();
         assert_eq!(iso, dir.join("26200.iso"));
         let c = sys.commands.borrow().clone();
         assert!(c.iter().any(|x| x.contains("Expand-Archive")));
@@ -204,7 +242,7 @@ mod tests {
         let d = tmp("err");
         fs::write(d.join("uup.zip"), b"x").unwrap();
         let sys = admin();
-        let e = run(&sys, &d.join("uup.zip"), &d, &mut |_, _| {}).unwrap_err();
+        let e = run(&sys, &d.join("uup.zip"), &d, &no_hosts(&d), &mut |_, _| {}).unwrap_err();
         assert!(e.contains(SCRIPT));
         let d2 = d.join("UUP");
         sys.hooks.borrow_mut().push((
@@ -214,7 +252,7 @@ mod tests {
                 let _ = fs::write(d2.join(SCRIPT), b"x");
             }),
         ));
-        let e = run(&sys, &d.join("uup.zip"), &d, &mut |_, _| {}).unwrap_err();
+        let e = run(&sys, &d.join("uup.zip"), &d, &no_hosts(&d), &mut |_, _| {}).unwrap_err();
         assert!(e.contains("nessuna ISO"));
         let _ = fs::remove_dir_all(&d);
     }

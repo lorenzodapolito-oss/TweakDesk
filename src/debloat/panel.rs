@@ -5,6 +5,7 @@ use crate::clean::sys::{RealSys, Sys};
 use crate::debloat::apply::{self, Kind};
 use crate::debloat::catalog::{items_for, Group, Item, Level};
 use crate::debloat::iso::{self, Compression, Edition, IsoMethod, Plan};
+use crate::debloat::netfix;
 use crate::debloat::target::Target;
 use crate::debloat::unattend;
 use crate::debloat::uup;
@@ -259,7 +260,7 @@ impl DebloatPanel {
         self.say(theme::LOG_INFO, "Avvio UUP dump…");
         self.spawn(ctx, move |tx| {
             let t2 = tx.clone();
-            match uup::run(&RealSys, &zip, &base, &mut |k, m| {
+            match uup::run(&RealSys, &zip, &base, &netfix::hosts_path(), &mut |k, m| {
                 let _ = t2.send(Event::Log(k, m.to_string()));
             }) {
                 Ok(p) => {
@@ -268,6 +269,27 @@ impl DebloatPanel {
                 Err(e) => {
                     let _ = tx.send(Event::Log(Kind::Err, format!("UUP dump: {e}")));
                 }
+            }
+        });
+    }
+
+    fn net_job(&mut self, ctx: &egui::Context, what: u8) {
+        self.say(theme::LOG_INFO, "Controllo la rete…");
+        self.spawn(ctx, move |tx| {
+            let log = |k: Kind, m: String| {
+                let _ = tx.send(Event::Log(k, m));
+            };
+            let r = match what {
+                0 => netfix::preflight(&RealSys, &netfix::hosts_path(), &mut |k, m| {
+                    log(k, m.to_string())
+                }),
+                1 => netfix::set_public_dns(&RealSys)
+                    .map(|_| log(Kind::Ok, "DNS impostati: 1.1.1.1 e 8.8.8.8".into())),
+                _ => netfix::reset_dns(&RealSys)
+                    .map(|_| log(Kind::Ok, "DNS automatici ripristinati".into())),
+            };
+            if let Err(e) = r {
+                log(Kind::Err, e);
             }
         });
     }
@@ -524,6 +546,15 @@ impl DebloatPanel {
                             .clicked()
                         {
                             self.run_uup(ctx);
+                        }
+                        if ui.add_enabled(!self.busy, egui::Button::new("Controlla la rete")).clicked() {
+                            self.net_job(ctx, 0);
+                        }
+                        if ui.add_enabled(!self.busy && self.is_admin, egui::Button::new("Imposta DNS pubblici")).clicked() {
+                            self.net_job(ctx, 1);
+                        }
+                        if ui.add_enabled(!self.busy && self.is_admin, egui::Button::new("DNS automatici")).clicked() {
+                            self.net_job(ctx, 2);
                         }
                         if ui.button("Apri uupdump.net").clicked() {
                             let _ = RealSys.run("cmd", &["/c", "start", "", "https://uupdump.net"]);
