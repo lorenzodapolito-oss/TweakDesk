@@ -1,6 +1,6 @@
 [package]
 name = "tweakdesk"
-version = "2.4.1"
+version = "2.5.0"
 edition = "2021"
 description = "TweakDesk - impostazioni di Windows, programmi, estensioni, script, pulizia, avvio automatico e backup di sistema"
 authors = ["Lorenzo D'Apolito"]

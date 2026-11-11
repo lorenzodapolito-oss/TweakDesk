@@ -26,8 +26,9 @@ enum Event {
     Finished,
 }
 
-#[derive(Clone, Copy, PartialEq)]
-enum Sub {
+/// Parte del pannello mostrata (scelta dalle sotto-schede in `app.rs`).
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum Part {
     Installed,
     Iso,
     Scripts,
@@ -52,7 +53,7 @@ fn kind_color(k: Kind) -> Color32 {
 }
 
 pub struct DebloatPanel {
-    sub: Sub,
+    sub: Part,
     setup: SetupPanel,
     inst: Checked,
     iso_items: Checked,
@@ -90,7 +91,7 @@ impl DebloatPanel {
             .map(|p| p.to_string_lossy().to_string())
             .unwrap_or_default();
         Self {
-            sub: Sub::Installed,
+            sub: Part::Installed,
             setup: SetupPanel::new(&base, Set::Optimize),
             inst: preset(false, Some(Level::Standard)),
             iso_items: preset(true, Some(Level::Standard)),
@@ -684,23 +685,20 @@ impl DebloatPanel {
         });
     }
 
-    pub fn show(&mut self, ui: &mut egui::Ui) {
+    pub fn show(&mut self, ui: &mut egui::Ui, part: Part) {
+        self.sub = part;
         self.pump();
         let msgs = std::mem::take(&mut self.setup.msgs);
         self.log.extend(msgs);
         let ctx = ui.ctx().clone();
-        egui::Panel::top("debloat_top").show(ui, |ui| {
-            ui.add_space(6.0);
-            ui.horizontal(|ui| {
-                ui.selectable_value(&mut self.sub, Sub::Installed, "Windows installato");
-                ui.selectable_value(&mut self.sub, Sub::Iso, "ISO di Windows 11");
-                ui.selectable_value(&mut self.sub, Sub::Scripts, "Script di ottimizzazione");
-                if self.busy {
+        if self.busy {
+            egui::Panel::top("debloat_top").show(ui, |ui| {
+                ui.horizontal(|ui| {
                     ui.spinner();
-                }
+                    ui.label(RichText::new("Lavoro in corso…").color(theme::MUTED));
+                });
             });
-            ui.add_space(4.0);
-        });
+        }
         egui::Panel::bottom("debloat_log").show(ui, |ui| {
             egui::Frame::new()
                 .fill(theme::LOG_BG)
@@ -719,9 +717,9 @@ impl DebloatPanel {
                 });
         });
         egui::CentralPanel::default().show(ui, |ui| match self.sub {
-            Sub::Installed => self.installed_tab(ui, &ctx),
-            Sub::Iso => self.iso_tab(ui, &ctx),
-            Sub::Scripts => self.setup.ui(ui),
+            Part::Installed => self.installed_tab(ui, &ctx),
+            Part::Iso => self.iso_tab(ui, &ctx),
+            Part::Scripts => self.setup.ui(ui),
         });
         if self.confirm {
             let items = Self::chosen(&self.inst, false);
