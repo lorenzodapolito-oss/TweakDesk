@@ -103,6 +103,10 @@ fn tab_button(ui: &mut egui::Ui, text: &str, color: Color32, selected: bool) -> 
 }
 
 impl eframe::App for App {
+    fn clear_color(&self, _visuals: &egui::Visuals) -> [f32; 4] {
+        theme::BG.to_normalized_gamma_f32()
+    }
+
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         egui::Panel::top("sections").show(ui, |ui| {
             ui.add_space(6.0);

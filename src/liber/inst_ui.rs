@@ -562,6 +562,9 @@ impl InstApp {
                                                 ui.label(RichText::new(format!("{kind}{v}")).color(theme::MUTED).small());
                                             });
                                         });
+                                        if let Some(d) = crate::liber::describe::of(&r.ins.name) {
+                                            ui.add(egui::Label::new(RichText::new(d).color(theme::TEXT).small()).truncate()).on_hover_text(d);
+                                        }
                                         let (t, c) = Self::status_text(r);
                                         let resp = ui.add(egui::Label::new(RichText::new(t.clone()).color(c).small().strong()).truncate());
                                         if matches!(r.status, IStatus::Error(_)) {

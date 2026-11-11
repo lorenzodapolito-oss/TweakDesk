@@ -2,19 +2,19 @@
 
 use eframe::egui::{self, Color32, CornerRadius, Stroke};
 
-/// Sfondo: azzurro pervinca.
-pub const BG: Color32 = Color32::from_rgb(0xD6, 0xE3, 0xF8);
-/// Pannelli, finestre e campi di testo: azzurro cielo chiaro (mai bianco).
-pub const SURFACE: Color32 = Color32::from_rgb(0xE4, 0xEC, 0xFA);
+/// Sfondo: celeste pastello.
+pub const BG: Color32 = Color32::from_rgb(0xC4, 0xE6, 0xF9);
+/// Pannelli, finestre e campi di testo: celeste un po' più chiaro (mai bianco).
+pub const SURFACE: Color32 = Color32::from_rgb(0xD3, 0xEE, 0xFB);
 /// Riga alternata delle tabelle: lilla.
-pub const STRIPE: Color32 = Color32::from_rgb(0xE3, 0xDB, 0xF4);
+pub const STRIPE: Color32 = Color32::from_rgb(0xBA, 0xDE, 0xF4);
 pub const PRIMARY: Color32 = Color32::from_rgb(0x4F, 0x7C, 0xD6);
-pub const PRIMARY_LIGHT: Color32 = Color32::from_rgb(0xC3, 0xD3, 0xF4);
+pub const PRIMARY_LIGHT: Color32 = Color32::from_rgb(0xAC, 0xCF, 0xF1);
 /// Testo: blu notte.
 pub const TEXT: Color32 = Color32::from_rgb(0x22, 0x31, 0x5E);
 /// Testo secondario: blu polvere.
 pub const MUTED: Color32 = Color32::from_rgb(0x58, 0x68, 0x98);
-pub const BORDER: Color32 = Color32::from_rgb(0xA9, 0xBC, 0xE6);
+pub const BORDER: Color32 = Color32::from_rgb(0x8F, 0xBC, 0xE0);
 pub const OK: Color32 = Color32::from_rgb(0x1F, 0x86, 0x5C);
 pub const WARN: Color32 = Color32::from_rgb(0xB0, 0x62, 0x18);
 pub const ERR: Color32 = Color32::from_rgb(0xBC, 0x3C, 0x58);

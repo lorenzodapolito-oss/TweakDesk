@@ -694,6 +694,9 @@ impl LiberPanel {
                                         ui.label(RichText::new(ver).color(theme::MUTED).small());
                                     });
                                 });
+                                if let Some(d) = crate::liber::describe::of(&r.app.name) {
+                                    ui.add(egui::Label::new(RichText::new(d).color(theme::TEXT).small()).truncate()).on_hover_text(d);
+                                }
                                 let (t, c) = Self::status_text(r);
                                 let resp = ui.add(egui::Label::new(RichText::new(t).color(c).small().strong()).truncate());
                                 if let Status::Result(Check::Error(e)) = &r.status {

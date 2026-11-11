@@ -4,6 +4,7 @@
 pub mod archive;
 pub mod catalog;
 pub mod config;
+pub mod describe;
 pub mod github;
 pub mod inst_ui;
 pub mod inst_update;
