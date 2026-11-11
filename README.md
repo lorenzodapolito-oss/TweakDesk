@@ -58,3 +58,7 @@ Servono i permessi di amministratore. Provare sempre prima in una macchina virtu
 ## Scheda «Programmi» (2.3)
 
 La scheda ora è LiberDesk: gestisce le app **portabili** di una cartella `Apps` (raggruppate per categoria, aggiornate all'avvio da GitHub o da winget) e i programmi **non portabili** di una cartella `Installers` (script di installazione silenziosa, aggiornamenti con winget). Le cartelle stanno accanto a `tweakdesk.exe`; le impostazioni sono in `liberdesk.json`. Il vecchio elenco dei «Programmi del PC» non è più raggiungibile dall'interfaccia.
+
+## Estensioni Chrome: da un profilo/account a un altro (2.3.1)
+
+In «Estensioni Chrome» scegli **«Estrai dal profilo»** (nome, account Google e cartella di ogni profilo) per estrarre solo le sue estensioni, poi **«Installa nel profilo»** per la destinazione: quelle che il profilo ha già vengono escluse e il tasto «Installa estensioni» apre le pagine del Web Store direttamente in quel profilo (`--profile-directory`). Chrome non permette di installare senza la tua conferma: in ogni pagina va premuto «Aggiungi a Chrome». L'installazione forzata con i criteri vale invece per tutti i profili del PC.

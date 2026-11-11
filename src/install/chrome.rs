@@ -9,6 +9,8 @@ pub struct Ext {
     pub name: String,
     pub version: String,
     pub profile: String,
+    /// Nome della cartella del profilo (`Default`, `Profile 1`…).
+    pub profile_dir: String,
     /// Installata dal Chrome Web Store (ha l'indirizzo di aggiornamento di Google).
     pub store: bool,
     pub theme: bool,
@@ -81,33 +83,65 @@ fn localized(dir: &Path, manifest: &Value, text: &str) -> String {
     text.to_string()
 }
 
-fn profile_names(user_data: &Path) -> Vec<(String, String)> {
-    let names = read_json(&user_data.join("Local State"))
+/// Un profilo di Chrome: cartella e nome da mostrare (nome, account e cartella).
+#[derive(Clone, Debug, PartialEq)]
+pub struct Profile {
+    pub dir: String,
+    pub shown: String,
+}
+
+/// Una cartella di profilo valida: niente percorsi né caratteri speciali.
+pub fn valid_profile_dir(d: &str) -> bool {
+    !d.is_empty()
+        && d.len() <= 64
+        && d.chars()
+            .all(|c| c.is_alphanumeric() || matches!(c, ' ' | '_' | '-'))
+}
+
+fn label(info: &Value, d: &str) -> String {
+    let p = info.get(d);
+    let name = p.and_then(|p| p.get("name")).and_then(Value::as_str);
+    let mail = p
+        .and_then(|p| p.get("user_name"))
+        .and_then(Value::as_str)
+        .filter(|m| !m.is_empty());
+    match (name, mail) {
+        (Some(n), Some(m)) => format!("{n}, {m} ({d})"),
+        (Some(n), None) => format!("{n} ({d})"),
+        (None, Some(m)) => format!("{m} ({d})"),
+        (None, None) => d.to_string(),
+    }
+}
+
+/// Profili di Chrome; con `only_with_extensions` solo quelli che hanno estensioni.
+pub fn profiles(user_data: &Path, only_with_extensions: bool) -> Vec<Profile> {
+    let info = read_json(&user_data.join("Local State"))
         .and_then(|v| v.pointer("/profile/info_cache").cloned())
         .unwrap_or(Value::Null);
     let mut dirs: Vec<String> = std::fs::read_dir(user_data)
         .map(|rd| {
             rd.filter_map(Result::ok)
-                .filter(|e| e.path().join("Extensions").is_dir())
+                .filter(|e| {
+                    if only_with_extensions {
+                        e.path().join("Extensions").is_dir()
+                    } else {
+                        e.path().join("Preferences").is_file()
+                    }
+                })
                 .filter_map(|e| e.file_name().into_string().ok())
                 .collect()
         })
         .unwrap_or_default();
     dirs.sort();
     dirs.into_iter()
-        .map(|d| {
-            let shown = names
-                .get(&d)
-                .and_then(|p| p.get("name"))
-                .and_then(Value::as_str)
-                .map(|n| format!("{n} ({d})"))
-                .unwrap_or_else(|| d.clone());
-            (d, shown)
+        .map(|d| Profile {
+            shown: label(&info, &d),
+            dir: d,
         })
         .collect()
 }
 
-fn read_extension(profile: &str, id: &str, folder: &Path) -> Option<Ext> {
+fn read_extension(profile: &str, profile_dir: &str, id: &str, folder: &Path) -> Option<Ext> {
     let mut versions: Vec<String> = std::fs::read_dir(folder)
         .ok()?
         .filter_map(Result::ok)
@@ -134,6 +168,7 @@ fn read_extension(profile: &str, id: &str, folder: &Path) -> Option<Ext> {
         name,
         version,
         profile: profile.to_string(),
+        profile_dir: profile_dir.to_string(),
         store,
         theme: manifest.get("theme").is_some(),
     })
@@ -142,7 +177,7 @@ fn read_extension(profile: &str, id: &str, folder: &Path) -> Option<Ext> {
 /// Tutte le estensioni di tutti i profili sotto `user_data`, ordinate per nome.
 pub fn scan(user_data: &Path) -> Vec<Ext> {
     let mut out = Vec::new();
-    for (dir, shown) in profile_names(user_data) {
+    for Profile { dir, shown } in profiles(user_data, true) {
         let ext_dir = user_data.join(&dir).join("Extensions");
         let Ok(rd) = std::fs::read_dir(&ext_dir) else {
             continue;
@@ -154,7 +189,7 @@ pub fn scan(user_data: &Path) -> Vec<Ext> {
             if !valid_id(&id) {
                 continue;
             }
-            if let Some(x) = read_extension(&shown, &id, &e.path()) {
+            if let Some(x) = read_extension(&shown, &dir, &id, &e.path()) {
                 out.push(x);
             }
         }
@@ -229,6 +264,7 @@ mod tests {
         assert_eq!(a.name, "Blocca pubblicità");
         assert_eq!(a.version, "1.10.0");
         assert_eq!(a.profile, "Lorenzo (Default)");
+        assert_eq!(a.profile_dir, "Default");
         assert!(a.store && !a.theme);
         let b = list.iter().find(|e| e.id == ID_B).unwrap();
         assert_eq!(b.profile, "Profile 1");
@@ -248,5 +284,32 @@ mod tests {
         assert_eq!(localized(&d, &m, "__MSG_nope__"), "__MSG_nope__");
         assert_eq!(localized(&d, &m, "Semplice"), "Semplice");
         let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn profiles_show_account_and_validate_dirs() {
+        let ud = tmp("prof");
+        put(
+            &ud.join("Local State"),
+            r#"{"profile":{"info_cache":{"Default":{"name":"Lorenzo","user_name":"a@b.it"},"Profile 1":{"name":"Lavoro","user_name":""}}}}"#,
+        );
+        put(&ud.join("Default/Preferences"), "{}");
+        put(&ud.join("Profile 1/Preferences"), "{}");
+        put(&ud.join("Profile 2/Preferences"), "{}");
+        put(&ud.join("Cache/x"), "x");
+        let all = profiles(&ud, false);
+        let shown: Vec<_> = all.iter().map(|p| p.shown.as_str()).collect();
+        assert_eq!(
+            shown,
+            vec![
+                "Lorenzo, a@b.it (Default)",
+                "Lavoro (Profile 1)",
+                "Profile 2"
+            ]
+        );
+        assert!(profiles(&ud, true).is_empty());
+        assert!(valid_profile_dir("Profile 1") && valid_profile_dir("Default"));
+        assert!(!valid_profile_dir("") && !valid_profile_dir("../x") && !valid_profile_dir("a\"b"));
+        let _ = std::fs::remove_dir_all(&ud);
     }
 }

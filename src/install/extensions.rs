@@ -136,13 +136,22 @@ pub fn batches(ids: &[String], size: usize) -> Vec<Vec<String>> {
         .collect()
 }
 
-/// Apre gli indirizzi in Chrome (su Windows `start chrome`, altrove il browser predefinito).
-pub fn open_in_chrome(urls: &[String]) -> Result<(), String> {
+/// Apre gli indirizzi in Chrome, se serve nel profilo indicato (su Windows `start chrome`, altrove
+/// il browser predefinito).
+pub fn open_in_chrome(urls: &[String], profile_dir: Option<&str>) -> Result<(), String> {
     use std::process::Command;
+    let profile_arg = match profile_dir {
+        Some(d) if crate::install::chrome::valid_profile_dir(d) => {
+            Some(format!("--profile-directory={d}"))
+        }
+        Some(_) => return Err("Nome del profilo non valido".into()),
+        None => None,
+    };
     #[cfg(windows)]
     {
         Command::new("cmd")
             .args(["/c", "start", "", "chrome"])
+            .args(profile_arg.iter())
             .args(urls)
             .spawn()
             .map(|_| ())
@@ -150,6 +159,7 @@ pub fn open_in_chrome(urls: &[String]) -> Result<(), String> {
     }
     #[cfg(not(windows))]
     {
+        let _ = profile_arg;
         for u in urls {
             Command::new("xdg-open")
                 .arg(u)
@@ -196,6 +206,7 @@ mod tests {
             name: name.into(),
             version: "1.0".into(),
             profile: profile.into(),
+            profile_dir: "Default".into(),
             store: true,
             theme: false,
         }

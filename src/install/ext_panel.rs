@@ -9,6 +9,13 @@ use std::path::PathBuf;
 
 const BATCH: usize = 8;
 
+impl Row {
+    /// Da installare: quelle scelte che il profilo di destinazione non ha già.
+    fn wants_install(&self) -> bool {
+        self.selected && !self.present
+    }
+}
+
 struct Row {
     ext: Ext,
     selected: bool,
@@ -35,6 +42,15 @@ pub struct ExtPanel {
     mode: Mode,
     /// Quanti gruppi di schede sono già stati aperti.
     opened_batches: usize,
+    /// Tutti i profili di Chrome (per la destinazione) e quelli con estensioni (per l'origine).
+    profiles: Vec<chrome::Profile>,
+    source_profiles: Vec<chrome::Profile>,
+    /// Profilo da cui estrarre (`None` = tutti).
+    source: Option<String>,
+    /// Profilo in cui installare (`None` = quello che Chrome apre di solito).
+    target: Option<String>,
+    /// Id delle estensioni già presenti nel profilo di destinazione (o in uno qualsiasi).
+    have: BTreeSet<String>,
 }
 
 impl ExtPanel {
@@ -48,13 +64,65 @@ impl ExtPanel {
             install_open: false,
             mode: Mode::Store,
             opened_batches: 0,
+            profiles: Vec::new(),
+            source_profiles: Vec::new(),
+            source: None,
+            target: None,
+            have: BTreeSet::new(),
         };
+        p.load_profiles();
         p.extract();
         p
     }
 
     fn say(&mut self, color: Color32, msg: String) {
         self.msgs.push((color, msg));
+    }
+
+    fn load_profiles(&mut self) {
+        match self.user_data.as_deref() {
+            Some(ud) => {
+                self.profiles = chrome::profiles(ud, false);
+                self.source_profiles = chrome::profiles(ud, true);
+            }
+            None => {
+                self.profiles.clear();
+                self.source_profiles.clear();
+            }
+        }
+        // Una scelta che non esiste più si azzera.
+        let has = |v: &[chrome::Profile], d: &Option<String>| {
+            d.as_ref().is_none_or(|d| v.iter().any(|p| &p.dir == d))
+        };
+        if !has(&self.source_profiles, &self.source) {
+            self.source = None;
+        }
+        if !has(&self.profiles, &self.target) {
+            self.target = None;
+        }
+    }
+
+    /// Ricalcola quali estensioni il profilo di destinazione ha già.
+    fn refresh_present(&mut self) {
+        let local = self.local();
+        self.have = local
+            .iter()
+            .filter(|e| self.target.as_ref().is_none_or(|t| &e.profile_dir == t))
+            .map(|e| e.id.clone())
+            .collect();
+        let target_set = self.target.is_some();
+        for r in &mut self.rows {
+            // Senza una destinazione precisa, le estensioni estratte da qui si possono sempre
+            // reinstallare; quelle di un elenco si saltano se Chrome le ha già.
+            r.present = if target_set || r.imported {
+                self.have.contains(&r.ext.id)
+            } else {
+                false
+            };
+            if r.present {
+                r.selected = false;
+            }
+        }
     }
 
     fn local(&self) -> Vec<Ext> {
@@ -73,7 +141,10 @@ impl ExtPanel {
             );
             return;
         };
-        let list = chrome::scan(&ud);
+        let mut list = chrome::scan(&ud);
+        if let Some(src) = &self.source {
+            list.retain(|e| &e.profile_dir == src);
+        }
         if list.is_empty() {
             self.say(
                 theme::LOG_WARN,
@@ -93,11 +164,12 @@ impl ExtPanel {
             .map(|ext| Row {
                 selected: ext.store && !ext.theme,
                 ext,
-                present: true,
+                present: false,
                 imported: false,
             })
             .collect();
         self.opened_batches = 0;
+        self.refresh_present();
     }
 
     fn choose_chrome_folder(&mut self) {
@@ -106,6 +178,7 @@ impl ExtPanel {
             .pick_folder()
         {
             self.user_data = Some(d);
+            self.load_profiles();
             self.extract();
         }
     }
@@ -159,27 +232,25 @@ impl ExtPanel {
         match ExtList::load(&path) {
             Err(e) => self.say(theme::LOG_ERR, e),
             Ok(list) => {
-                let have: BTreeSet<String> = self.local().into_iter().map(|e| e.id).collect();
                 self.rows = list
                     .extensions
                     .into_iter()
-                    .map(|e| {
-                        let present = have.contains(&e.id);
-                        Row {
-                            ext: Ext {
-                                id: e.id,
-                                name: e.name,
-                                version: e.version,
-                                profile: "Elenco".into(),
-                                store: true,
-                                theme: false,
-                            },
-                            selected: !present,
-                            present,
-                            imported: true,
-                        }
+                    .map(|e| Row {
+                        ext: Ext {
+                            id: e.id,
+                            name: e.name,
+                            version: e.version,
+                            profile: "Elenco".into(),
+                            profile_dir: String::new(),
+                            store: true,
+                            theme: false,
+                        },
+                        selected: true,
+                        present: false,
+                        imported: true,
                     })
                     .collect();
+                self.refresh_present();
                 self.opened_batches = 0;
                 let n = self.rows.iter().filter(|r| !r.present).count();
                 self.say(
@@ -198,7 +269,7 @@ impl ExtPanel {
         let mut seen = BTreeSet::new();
         self.rows
             .iter()
-            .filter(|r| r.selected && !r.present && seen.insert(r.ext.id.clone()))
+            .filter(|r| r.wants_install() && seen.insert(r.ext.id.clone()))
             .map(|r| r.ext.id.clone())
             .collect()
     }
@@ -209,14 +280,17 @@ impl ExtPanel {
             self.say(theme::LOG_OK, "Tutte le schede sono state aperte.".into());
             return;
         };
-        match install::open_in_chrome(b) {
+        match install::open_in_chrome(b, self.target.as_deref()) {
             Ok(()) => {
                 self.opened_batches += 1;
                 self.say(
                     theme::LOG_OK,
                     format!(
-                        "Aperte {} schede del Web Store: premi «Aggiungi a Chrome» in ognuna.",
-                        b.len()
+                        "Aperte {} schede del Web Store{}: premi «Aggiungi a Chrome» in ognuna.",
+                        b.len(),
+                        self.target
+                            .as_deref()
+                            .map_or(String::new(), |t| format!(" nel profilo {t}"))
                     ),
                 );
             }
@@ -324,6 +398,8 @@ impl ExtPanel {
                             ui.label(&r.ext.profile);
                             let note = if r.imported && r.present {
                                 RichText::new("Già in Chrome").color(theme::OK)
+                            } else if r.present {
+                                RichText::new("Già nel profilo di destinazione").color(theme::OK)
                             } else if r.ext.theme {
                                 RichText::new("Tema").color(theme::MUTED)
                             } else if !r.ext.store {
@@ -346,7 +422,7 @@ impl ExtPanel {
             .open(&mut open)
             .default_width(520.0)
             .show(ctx, |ui| {
-                ui.label(format!("{} estensioni da installare (selezionate e non ancora presenti).", ids.len()));
+                ui.label(format!("{} estensioni da installare (selezionate e non ancora nel profilo di destinazione).", ids.len()));
                 ui.add_space(6.0);
                 ui.radio_value(&mut self.mode, Mode::Store, "Web Store: apro le pagine, tu premi «Aggiungi a Chrome» (consigliato)");
                 ui.radio_value(&mut self.mode, Mode::Policy, "Installazione forzata con criteri di Chrome (amministratore)");
@@ -354,14 +430,14 @@ impl ExtPanel {
                 match self.mode {
                     Mode::Store => {
                         let total = install::batches(&ids, BATCH).len();
-                        ui.label(RichText::new("Chrome non permette di installare estensioni di nascosto: ogni pagina va confermata. Le apro a gruppi di 8.").color(theme::MUTED));
+                        ui.label(RichText::new("Chrome non permette di installare estensioni di nascosto: ogni pagina va confermata. Le apro a gruppi di 8, nel profilo scelto in «Installa nel profilo».").color(theme::MUTED));
                         let label = if self.opened_batches == 0 { "Apri le prime 8 schede".to_string() } else { format!("Apri le prossime 8 ({} di {total} fatti)", self.opened_batches) };
                         if Self::big_button(ui, &label, theme::DOWNLOAD, self.opened_batches < total) {
                             self.open_next_batch();
                         }
                     }
                     Mode::Policy => {
-                        ui.label(RichText::new("Chrome installa da solo tutto al riavvio, ma le estensioni risultano «gestite dall'organizzazione» e non si possono rimuovere finché non togli i criteri (file «Rimuovi-installazione-forzata.reg»).").color(theme::WARN));
+                        ui.label(RichText::new("Vale per tutti i profili del PC (il profilo di destinazione non conta). Chrome installa da solo tutto al riavvio, ma le estensioni risultano «gestite dall'organizzazione» e non si possono rimuovere finché non togli i criteri (file «Rimuovi-installazione-forzata.reg»).").color(theme::WARN));
                         ui.horizontal(|ui| {
                             if Self::big_button(ui, "Applica ora (admin)", theme::INSTALL, !ids.is_empty()) {
                                 self.policy_files(true);
@@ -402,10 +478,138 @@ impl ExtPanel {
                 self.choose_chrome_folder();
             }
         });
+        let mut re_extract = false;
+        let mut re_present = false;
+        ui.horizontal_wrapped(|ui| {
+            let name = |v: &[chrome::Profile], d: &Option<String>, none: &str| -> String {
+                d.as_ref()
+                    .and_then(|d| v.iter().find(|p| &p.dir == d))
+                    .map_or(none.to_string(), |p| p.shown.clone())
+            };
+            ui.label("Estrai dal profilo:");
+            egui::ComboBox::from_id_salt("ext_src")
+                .selected_text(name(&self.source_profiles, &self.source, "Tutti i profili"))
+                .show_ui(ui, |ui| {
+                    if ui
+                        .selectable_label(self.source.is_none(), "Tutti i profili")
+                        .clicked()
+                    {
+                        self.source = None;
+                        re_extract = true;
+                    }
+                    for p in &self.source_profiles {
+                        let sel = self.source.as_deref() == Some(p.dir.as_str());
+                        if ui.selectable_label(sel, &p.shown).clicked() {
+                            self.source = Some(p.dir.clone());
+                            re_extract = true;
+                        }
+                    }
+                });
+            ui.add_space(12.0);
+            ui.label("Installa nel profilo:");
+            egui::ComboBox::from_id_salt("ext_dst")
+                .selected_text(name(
+                    &self.profiles,
+                    &self.target,
+                    "Quello predefinito di Chrome",
+                ))
+                .show_ui(ui, |ui| {
+                    if ui
+                        .selectable_label(self.target.is_none(), "Quello predefinito di Chrome")
+                        .clicked()
+                    {
+                        self.target = None;
+                        re_present = true;
+                    }
+                    for p in &self.profiles {
+                        let sel = self.target.as_deref() == Some(p.dir.as_str());
+                        if ui.selectable_label(sel, &p.shown).clicked() {
+                            self.target = Some(p.dir.clone());
+                            re_present = true;
+                        }
+                    }
+                });
+        });
+        if re_extract {
+            self.extract();
+        } else if re_present {
+            self.opened_batches = 0;
+            self.refresh_present();
+        }
         ui.add_space(4.0);
         self.table(ui);
         if self.install_open {
             self.install_window(&ctx);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn row(selected: bool, present: bool, imported: bool) -> Row {
+        Row {
+            ext: Ext {
+                id: "a".repeat(32),
+                name: "x".into(),
+                version: "1".into(),
+                profile: "Default".into(),
+                profile_dir: "Default".into(),
+                store: true,
+                theme: false,
+            },
+            selected,
+            present,
+            imported,
+        }
+    }
+
+    #[test]
+    fn only_selected_rows_missing_from_the_target_are_installed() {
+        assert!(row(true, false, false).wants_install());
+        assert!(row(true, false, true).wants_install());
+        assert!(!row(true, true, false).wants_install());
+        assert!(!row(true, true, true).wants_install());
+        assert!(!row(false, false, true).wants_install());
+    }
+
+    #[test]
+    fn extract_one_profile_and_install_into_another() {
+        let a = "a".repeat(32);
+        let b = "b".repeat(32);
+        let ud = std::env::temp_dir().join(format!("ld_extp_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&ud);
+        for (prof, id) in [("Default", &a), ("Profile 1", &b)] {
+            let m = ud.join(format!("{prof}/Extensions/{id}/1.0_0"));
+            std::fs::create_dir_all(&m).unwrap();
+            std::fs::write(m.join("manifest.json"), r#"{"name":"E","version":"1.0","update_url":"https://clients2.google.com/service/update2/crx"}"#).unwrap();
+            std::fs::write(ud.join(format!("{prof}/Preferences")), "{}").unwrap();
+        }
+        std::fs::create_dir_all(ud.join("Profile 2")).unwrap();
+        std::fs::write(ud.join("Profile 2/Preferences"), "{}").unwrap();
+        let mut p = ExtPanel::new(&ud);
+        p.user_data = Some(ud.clone());
+        p.load_profiles();
+        assert_eq!(p.profiles.len(), 3);
+        assert_eq!(p.source_profiles.len(), 2);
+        p.source = Some("Default".into());
+        p.extract();
+        assert_eq!(p.rows.len(), 1);
+        assert_eq!(p.rows[0].ext.id, a);
+        // Destinazione: un profilo vuoto -> da installare.
+        p.target = Some("Profile 2".into());
+        p.refresh_present();
+        assert_eq!(p.to_install(), vec![a.clone()]);
+        // Destinazione: il profilo che la ha già -> niente da fare.
+        p.target = Some("Default".into());
+        p.rows[0].selected = true;
+        p.refresh_present();
+        assert!(p.to_install().is_empty());
+        // Un profilo scomparso azzera la scelta.
+        p.target = Some("Profile 9".into());
+        p.load_profiles();
+        assert_eq!(p.target, None);
+        let _ = std::fs::remove_dir_all(&ud);
     }
 }
