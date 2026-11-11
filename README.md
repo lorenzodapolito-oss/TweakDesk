@@ -54,3 +54,7 @@ Servono i permessi di amministratore. Provare sempre prima in una macchina virtu
 - **Aggiornamenti nella ISO**: puoi aggiungere file `.msu`/`.cab` (dal Catalogo di Microsoft Update); vengono integrati in ogni edizione con DISM prima delle voci scelte.
 - **ISO da UUP dump**: indichi lo zip scaricato da uupdump.net, TweakDesk lo estrae in una cartella corta ed esegue lo script; la ISO prodotta diventa quella di partenza.
 - **Download di Windows senza errori di rete**: prima di avviare lo script di UUP dump, TweakDesk pulisce dal file hosts le righe che bloccano i server Microsoft (con copia `hosts.tweakdesk.bak`), controlla che il DNS risolva `tlu.dl.delivery.mp.microsoft.com` e limita a 6 i tentativi dello script (di suo ripete all'infinito). Pulsanti «Controlla la rete», «Imposta DNS pubblici» (1.1.1.1 / 8.8.8.8) e «DNS automatici».
+
+## Scheda «Programmi» (2.3)
+
+La scheda ora è LiberDesk: gestisce le app **portabili** di una cartella `Apps` (raggruppate per categoria, aggiornate all'avvio da GitHub o da winget) e i programmi **non portabili** di una cartella `Installers` (script di installazione silenziosa, aggiornamenti con winget). Le cartelle stanno accanto a `tweakdesk.exe`; le impostazioni sono in `liberdesk.json`. Il vecchio elenco dei «Programmi del PC» non è più raggiungibile dall'interfaccia.

@@ -1,6 +1,6 @@
 [package]
 name = "tweakdesk"
-version = "2.2.0"
+version = "2.3.0"
 edition = "2021"
 description = "TweakDesk - impostazioni di Windows, programmi, estensioni, script, pulizia, avvio automatico e backup di sistema"
 authors = ["Lorenzo D'Apolito"]
@@ -13,6 +13,12 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 regex = "1"
 chrono = "0.4"
+ureq = "3"
+zip = { version = "2", default-features = false, features = ["deflate"] }
+sevenz-rust = "0.6.1"
+
+[dev-dependencies]
+sevenz-rust = { version = "0.6.1", features = ["compress"] }
 
 [target.'cfg(windows)'.build-dependencies]
 winresource = "0.1"

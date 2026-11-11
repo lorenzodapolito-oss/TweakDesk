@@ -1,4 +1,4 @@
-#![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
+#![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used, clippy::panic))]
 #![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
 
 mod app;
@@ -7,6 +7,7 @@ mod clean;
 mod debloat;
 mod engine;
 mod install;
+mod liber;
 mod model;
 mod regfile;
 mod registry;

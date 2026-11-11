@@ -3,6 +3,7 @@
 use crate::clean::panel::{CleanPanel, Tab as CleanTab};
 use crate::debloat::panel::DebloatPanel;
 use crate::install::app::{InstallPanel, Tab as InstallTab};
+use crate::liber::panel::LiberPanel;
 use crate::theme;
 use crate::tweak_panel::TweakPanel;
 use eframe::egui::{self, Color32, RichText};
@@ -45,6 +46,7 @@ pub struct App {
     section: Section,
     tweak: TweakPanel,
     install: InstallPanel,
+    liber: LiberPanel,
     clean: CleanPanel,
     debloat: DebloatPanel,
 }
@@ -56,6 +58,7 @@ impl App {
             section: Section::Settings,
             tweak: TweakPanel::new(open),
             install: InstallPanel::new(),
+            liber: LiberPanel::new(),
             clean: CleanPanel::new(),
             debloat: DebloatPanel::new(),
         }
@@ -64,14 +67,11 @@ impl App {
     fn select(&mut self, s: Section) {
         self.section = s;
         match s {
-            Section::Programs => {
-                self.install.set_tab(InstallTab::Pc);
-            }
             Section::Extensions => self.install.set_tab(InstallTab::Ext),
             Section::Config => self.install.set_tab(InstallTab::Setup),
             Section::Clean => self.clean.set_tab(CleanTab::Clean),
             Section::Backup => self.clean.set_tab(CleanTab::Backup),
-            Section::Settings | Section::Debloat => {}
+            Section::Settings | Section::Programs | Section::Debloat => {}
         }
     }
 }
@@ -119,7 +119,8 @@ impl eframe::App for App {
         });
         match self.section {
             Section::Settings => self.tweak.show(ui),
-            Section::Programs | Section::Extensions | Section::Config => self.install.show(ui),
+            Section::Programs => self.liber.show(ui),
+            Section::Extensions | Section::Config => self.install.show(ui),
             Section::Clean | Section::Backup => self.clean.show(ui),
             Section::Debloat => self.debloat.show(ui),
         }
