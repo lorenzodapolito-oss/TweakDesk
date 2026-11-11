@@ -160,13 +160,36 @@ pub const SCRIPTS: &[Script] = &[
     },
 ];
 
+/// Fine riga di Windows: `cmd` con i soli LF può non trovare le etichette (`goto`, `call :x`) e
+/// spezzare i blocchi tra parentesi. Toglie anche l'eventuale BOM UTF-8 iniziale.
+pub fn crlf(b: &[u8]) -> Vec<u8> {
+    let b = b.strip_prefix(&[0xEF, 0xBB, 0xBF]).unwrap_or(b);
+    let mut out = Vec::with_capacity(b.len() + b.len() / 20);
+    let mut prev = 0u8;
+    for &c in b {
+        if c == b'\n' && prev != b'\r' {
+            out.push(b'\r');
+        }
+        out.push(c);
+        prev = c;
+    }
+    out
+}
+
 /// Scrive lo script nella cartella `dir` e ne restituisce il percorso. Per i file non incorporati
 /// cerca `dir\<file>` già presente.
 pub fn prepare(s: &Script, dir: &Path) -> Result<PathBuf, String> {
     std::fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
     let path = dir.join(s.file);
     match s.bytes {
-        Some(b) => std::fs::write(&path, b).map_err(|e| format!("{}: {e}", path.display()))?,
+        Some(b) => {
+            let data = if s.kind == Kind::Bat {
+                crlf(b)
+            } else {
+                b.to_vec()
+            };
+            std::fs::write(&path, data).map_err(|e| format!("{}: {e}", path.display()))?
+        }
         None if path.is_file() => {}
         None => {
             return Err(format!(
@@ -288,7 +311,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
         let s = SCRIPTS.iter().find(|s| s.file == "Italiano.bat").unwrap();
         let p = prepare(s, &dir).unwrap();
-        assert_eq!(std::fs::read(&p).unwrap(), s.bytes.unwrap());
+        assert_eq!(std::fs::read(&p).unwrap(), crlf(s.bytes.unwrap()));
         let ext = SCRIPTS.iter().find(|s| s.bytes.is_none()).unwrap();
         assert!(prepare(ext, &dir).unwrap_err().contains("non trovato"));
         std::fs::write(dir.join(ext.file), b"MZ").unwrap();
@@ -327,5 +350,28 @@ mod tests {
         assert!(SCRIPTS
             .iter()
             .all(|s| in_set(s, Set::Config) != in_set(s, Set::Optimize)));
+    }
+
+    #[test]
+    fn batch_files_get_windows_line_endings() {
+        assert_eq!(crlf(b"a\nb\r\nc"), b"a\r\nb\r\nc");
+        assert_eq!(crlf(b"\xEF\xBB\xBF@echo off\n"), b"@echo off\r\n");
+        assert_eq!(crlf(b""), b"");
+        let d = std::env::temp_dir().join(format!("td_crlf_{}", std::process::id()));
+        for s in SCRIPTS
+            .iter()
+            .filter(|s| s.kind == Kind::Bat && s.bytes.is_some())
+        {
+            let p = prepare(s, &d).unwrap();
+            let t = std::fs::read(&p).unwrap();
+            assert!(!t.starts_with(&[0xEF, 0xBB, 0xBF]), "{}", s.file);
+            let bare = t
+                .iter()
+                .enumerate()
+                .filter(|(i, c)| **c == b'\n' && (*i == 0 || t[i - 1] != b'\r'))
+                .count();
+            assert_eq!(bare, 0, "{} ha fine riga LF", s.file);
+        }
+        let _ = std::fs::remove_dir_all(&d);
     }
 }
