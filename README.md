@@ -62,3 +62,9 @@ La scheda ora è LiberDesk: gestisce le app **portabili** di una cartella `Apps`
 ## Estensioni Chrome: da un profilo/account a un altro (2.3.1)
 
 In «Estensioni Chrome» scegli **«Estrai dal profilo»** (nome, account Google e cartella di ogni profilo) per estrarre solo le sue estensioni, poi **«Installa nel profilo»** per la destinazione: quelle che il profilo ha già vengono escluse e il tasto «Installa estensioni» apre le pagine del Web Store direttamente in quel profilo (`--profile-directory`). Chrome non permette di installare senza la tua conferma: in ogni pagina va premuto «Aggiungi a Chrome». L'installazione forzata con i criteri vale invece per tutti i profili del PC.
+
+## Schede riorganizzate (2.4)
+
+- **Impostazioni di Windows**: due sotto-schede, «Singole impostazioni» (il catalogo di opzioni) e «Script di configurazione» (lingua, cartelle utente, Start, taskbar, attivazione, extra).
+- **Debloat e ottimizzazione**: nuova sotto-scheda «Script di ottimizzazione» con «Ottimizza Windows» e «Blocca Windows Update».
+- La scheda «Configurazione di Windows» non esiste più; le schede in alto sono 6.

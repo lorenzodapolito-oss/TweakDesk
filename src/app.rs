@@ -19,22 +19,27 @@ pub enum Section {
     Extensions,
     Clean,
     Backup,
-    Config,
     Debloat,
 }
 
+/// Sotto-schede della scheda «Impostazioni di Windows».
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum SettingsTab {
+    Single,
+    Scripts,
+}
+
 /// Scheda: titolo e colore pastello (sempre colorata, non solo quando è scelta).
-pub const SECTIONS: [(Section, &str, Color32); 7] = [
-    (Section::Settings, "Impostazioni", theme::TAB_BLUE),
+pub const SECTIONS: [(Section, &str, Color32); 6] = [
+    (
+        Section::Settings,
+        "Impostazioni di Windows",
+        theme::TAB_BLUE,
+    ),
     (Section::Programs, "Programmi", theme::TAB_MINT),
     (Section::Extensions, "Estensioni Chrome", theme::TAB_YELLOW),
     (Section::Clean, "Pulizia e avvio", theme::TAB_PEACH),
     (Section::Backup, "Backup di sistema", theme::TAB_LILAC),
-    (
-        Section::Config,
-        "Configurazione di Windows",
-        theme::TAB_AQUA,
-    ),
     (
         Section::Debloat,
         "Debloat e ottimizzazione",
@@ -44,6 +49,7 @@ pub const SECTIONS: [(Section, &str, Color32); 7] = [
 
 pub struct App {
     section: Section,
+    settings_tab: SettingsTab,
     tweak: TweakPanel,
     install: InstallPanel,
     liber: LiberPanel,
@@ -56,6 +62,7 @@ impl App {
         theme::apply(&cc.egui_ctx);
         Self {
             section: Section::Settings,
+            settings_tab: SettingsTab::Single,
             tweak: TweakPanel::new(open),
             install: InstallPanel::new(),
             liber: LiberPanel::new(),
@@ -68,7 +75,6 @@ impl App {
         self.section = s;
         match s {
             Section::Extensions => self.install.set_tab(InstallTab::Ext),
-            Section::Config => self.install.set_tab(InstallTab::Setup),
             Section::Clean => self.clean.set_tab(CleanTab::Clean),
             Section::Backup => self.clean.set_tab(CleanTab::Backup),
             Section::Settings | Section::Programs | Section::Debloat => {}
@@ -118,9 +124,33 @@ impl eframe::App for App {
             ui.add_space(4.0);
         });
         match self.section {
-            Section::Settings => self.tweak.show(ui),
+            Section::Settings => {
+                egui::Panel::top("settings_sub").show(ui, |ui| {
+                    ui.add_space(6.0);
+                    ui.horizontal(|ui| {
+                        ui.selectable_value(
+                            &mut self.settings_tab,
+                            SettingsTab::Single,
+                            "Singole impostazioni",
+                        );
+                        ui.selectable_value(
+                            &mut self.settings_tab,
+                            SettingsTab::Scripts,
+                            "Script di configurazione",
+                        );
+                    });
+                    ui.add_space(4.0);
+                });
+                match self.settings_tab {
+                    SettingsTab::Single => self.tweak.show(ui),
+                    SettingsTab::Scripts => {
+                        self.install.set_tab(InstallTab::Setup);
+                        self.install.show(ui);
+                    }
+                }
+            }
             Section::Programs => self.liber.show(ui),
-            Section::Extensions | Section::Config => self.install.show(ui),
+            Section::Extensions => self.install.show(ui),
             Section::Clean | Section::Backup => self.clean.show(ui),
             Section::Debloat => self.debloat.show(ui),
         }

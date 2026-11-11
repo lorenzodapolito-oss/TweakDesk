@@ -33,6 +33,22 @@ macro_rules! embed {
     };
 }
 
+/// Gruppo degli script di ottimizzazione: stanno nella scheda «Debloat e ottimizzazione».
+pub const OPTIMIZE_GROUP: &str = "Ottimizzazione di sistema";
+
+/// Quale parte degli script mostra un pannello.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Set {
+    /// Configurazione (lingua, cartelle, Start, taskbar, extra…).
+    Config,
+    /// Ottimizzazione (Ottimizza Windows, Blocca Windows Update).
+    Optimize,
+}
+
+pub fn in_set(s: &Script, set: Set) -> bool {
+    (s.group == OPTIMIZE_GROUP) == (set == Set::Optimize)
+}
+
 pub const SCRIPTS: &[Script] = &[
     Script {
         group: "Configurazione di sistema",
@@ -53,7 +69,7 @@ pub const SCRIPTS: &[Script] = &[
         bytes: embed!("Italiano.bat"),
     },
     Script {
-        group: "Configurazione di sistema",
+        group: OPTIMIZE_GROUP,
         label: "Ottimizza Windows",
         desc: "Toglie Copilot, telemetria, pubblicità, app inutili e OneDrive; disattiva servizi non essenziali.",
         file: "Ottimizza.bat",
@@ -71,7 +87,7 @@ pub const SCRIPTS: &[Script] = &[
         bytes: embed!("Attivazione.bat"),
     },
     Script {
-        group: "Configurazione di sistema",
+        group: OPTIMIZE_GROUP,
         label: "Blocca Windows Update",
         desc: "Disattiva Windows Update in modo aggressivo: servizi, attività, permessi, file di sistema rinominati, firewall e hosts.",
         file: "updateKill.bat",
@@ -136,7 +152,7 @@ pub const SCRIPTS: &[Script] = &[
     Script {
         group: "Extra",
         label: "Menu contestuale classico (W11ClassicMenu.exe)",
-        desc: "Avvia lo strumento di terzi per il menu contestuale classico. Il file non è incluso: mettilo nella cartella «Script» accanto a InstallDesk.",
+        desc: "Avvia lo strumento di terzi per il menu contestuale classico. Il file non è incluso: mettilo nella cartella «Script» accanto a TweakDesk.",
         file: "W11ClassicMenu.exe",
         kind: Kind::Exe,
         impact: Impact::Normal,
@@ -296,5 +312,20 @@ mod tests {
             args.contains("it''s.exe"),
             "apice raddoppiato per PowerShell"
         );
+    }
+
+    #[test]
+    fn optimization_scripts_are_split_from_configuration() {
+        let opt: Vec<_> = SCRIPTS
+            .iter()
+            .filter(|s| in_set(s, Set::Optimize))
+            .map(|s| s.label)
+            .collect();
+        assert_eq!(opt, vec!["Ottimizza Windows", "Blocca Windows Update"]);
+        let cfg = SCRIPTS.iter().filter(|s| in_set(s, Set::Config)).count();
+        assert_eq!(cfg + opt.len(), SCRIPTS.len());
+        assert!(SCRIPTS
+            .iter()
+            .all(|s| in_set(s, Set::Config) != in_set(s, Set::Optimize)));
     }
 }

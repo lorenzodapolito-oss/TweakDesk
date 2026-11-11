@@ -10,6 +10,8 @@ use crate::debloat::target::Target;
 use crate::debloat::unattend;
 use crate::debloat::uup;
 use crate::install::config::app_dir;
+use crate::install::setup::Set;
+use crate::install::setup_panel::SetupPanel;
 use crate::theme;
 use eframe::egui::{self, Color32, RichText};
 use std::collections::HashMap;
@@ -28,6 +30,7 @@ enum Event {
 enum Sub {
     Installed,
     Iso,
+    Scripts,
 }
 
 type Checked = HashMap<&'static str, bool>;
@@ -50,6 +53,7 @@ fn kind_color(k: Kind) -> Color32 {
 
 pub struct DebloatPanel {
     sub: Sub,
+    setup: SetupPanel,
     inst: Checked,
     iso_items: Checked,
     log: Vec<(Color32, String)>,
@@ -87,6 +91,7 @@ impl DebloatPanel {
             .unwrap_or_default();
         Self {
             sub: Sub::Installed,
+            setup: SetupPanel::new(&base, Set::Optimize),
             inst: preset(false, Some(Level::Standard)),
             iso_items: preset(true, Some(Level::Standard)),
             log: Vec::new(),
@@ -681,12 +686,15 @@ impl DebloatPanel {
 
     pub fn show(&mut self, ui: &mut egui::Ui) {
         self.pump();
+        let msgs = std::mem::take(&mut self.setup.msgs);
+        self.log.extend(msgs);
         let ctx = ui.ctx().clone();
         egui::Panel::top("debloat_top").show(ui, |ui| {
             ui.add_space(6.0);
             ui.horizontal(|ui| {
                 ui.selectable_value(&mut self.sub, Sub::Installed, "Windows installato");
                 ui.selectable_value(&mut self.sub, Sub::Iso, "ISO di Windows 11");
+                ui.selectable_value(&mut self.sub, Sub::Scripts, "Script di ottimizzazione");
                 if self.busy {
                     ui.spinner();
                 }
@@ -713,6 +721,7 @@ impl DebloatPanel {
         egui::CentralPanel::default().show(ui, |ui| match self.sub {
             Sub::Installed => self.installed_tab(ui, &ctx),
             Sub::Iso => self.iso_tab(ui, &ctx),
+            Sub::Scripts => self.setup.ui(ui),
         });
         if self.confirm {
             let items = Self::chosen(&self.inst, false);

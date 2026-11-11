@@ -1,12 +1,13 @@
 //! Scheda «Configurazione Windows»: lancia gli script di configurazione.
 
-use crate::install::setup::{self, Impact, SCRIPTS};
+use crate::install::setup::{self, in_set, Impact, Set, SCRIPTS};
 use crate::theme;
 use eframe::egui::{self, Color32, RichText};
 use std::path::PathBuf;
 
 pub struct SetupPanel {
     dir: PathBuf,
+    set: Set,
     admin: bool,
     confirm: Option<usize>,
     /// Messaggi da mostrare nel registro dell'app.
@@ -14,8 +15,9 @@ pub struct SetupPanel {
 }
 
 impl SetupPanel {
-    pub fn new(app_dir: &std::path::Path) -> Self {
+    pub fn new(app_dir: &std::path::Path, set: Set) -> Self {
         Self {
+            set,
             dir: app_dir.join("Script"),
             admin: setup::is_admin(),
             confirm: None,
@@ -42,9 +44,9 @@ impl SetupPanel {
 
     pub fn ui(&mut self, ui: &mut egui::Ui) {
         let note = if self.admin {
-            "InstallDesk è in esecuzione come amministratore: gli script partono senza altre richieste."
+            "TweakDesk è in esecuzione come amministratore: gli script partono senza altre richieste."
         } else {
-            "Ogni script chiede l'autorizzazione di amministratore. Per una sola richiesta, avvia InstallDesk come amministratore."
+            "Ogni script chiede l'autorizzazione di amministratore. Per una sola richiesta, avvia TweakDesk come amministratore."
         };
         ui.label(RichText::new(note).color(theme::MUTED));
         ui.add_space(4.0);
@@ -52,7 +54,8 @@ impl SetupPanel {
             .auto_shrink([false, false])
             .show(ui, |ui| {
                 let mut group = "";
-                for (i, s) in SCRIPTS.iter().enumerate() {
+                let set = self.set;
+                for (i, s) in SCRIPTS.iter().enumerate().filter(|(_, s)| in_set(s, set)) {
                     if s.group != group {
                         group = s.group;
                         ui.add_space(8.0);

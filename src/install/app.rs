@@ -5,6 +5,7 @@ use crate::install::config::{self, AppConfig};
 use crate::install::ext_panel::ExtPanel;
 use crate::install::manager::{self, Status};
 use crate::install::scan::{self, Item};
+use crate::install::setup::Set;
 use crate::install::setup_panel::SetupPanel;
 use crate::install::winget::{Installed, RealWinget};
 use crate::theme;
@@ -105,7 +106,7 @@ impl InstallPanel {
             confirm_install: false,
             bulk: false,
             ext: ExtPanel::new(&app_dir_copy),
-            setup: SetupPanel::new(&app_dir_copy),
+            setup: SetupPanel::new(&app_dir_copy, Set::Config),
         };
         app.refresh();
         let dir = app.root().display().to_string();
