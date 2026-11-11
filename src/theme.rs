@@ -71,8 +71,11 @@ pub fn apply(ctx: &egui::Context) {
     v.widgets.active.weak_bg_fill = Color32::from_rgb(0xA3, 0xBB, 0xEE);
     v.widgets.open.bg_fill = PRIMARY_LIGHT;
     v.widgets.open.weak_bg_fill = PRIMARY_LIGHT;
-    ctx.set_visuals(v);
-    ctx.global_style_mut(|s| {
+    // Sempre chiaro, qualunque sia il tema di Windows (altrimenti egui ripiega sui suoi colori).
+    ctx.set_theme(egui::ThemePreference::Light);
+    ctx.set_visuals_of(egui::Theme::Light, v.clone());
+    ctx.set_visuals_of(egui::Theme::Dark, v);
+    ctx.all_styles_mut(|s| {
         s.spacing.item_spacing = egui::vec2(8.0, 6.0);
         s.spacing.button_padding = egui::vec2(12.0, 6.0);
     });

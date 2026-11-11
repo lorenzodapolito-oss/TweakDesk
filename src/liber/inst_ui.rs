@@ -128,6 +128,7 @@ pub struct InstApp {
     runner: Arc<dyn Runner>,
     assoc: Option<Assoc>,
     switches: Option<Switches>,
+    confirm_trash: Option<usize>,
 }
 
 impl InstApp {
@@ -149,6 +150,7 @@ impl InstApp {
             runner: Arc::new(RealRunner),
             assoc: None,
             switches: None,
+            confirm_trash: None,
         }
     }
 
@@ -512,6 +514,7 @@ impl InstApp {
         let mut install = None;
         let mut upd = None;
         let mut search = None;
+        let mut trash = None;
         let mut assoc = None;
         let mut sw = None;
         egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
@@ -566,7 +569,7 @@ impl InstApp {
                                             });
                                         });
                                         if let Some(d) = crate::liber::describe::of(&r.ins.name) {
-                                            ui.add(egui::Label::new(RichText::new(d).color(theme::TEXT).small()).truncate()).on_hover_text(d);
+                                            ui.add(egui::Label::new(RichText::new(d).color(theme::TEXT).size(13.5)).wrap());
                                         }
                                         let (t, c) = Self::status_text(r);
                                         let resp = ui.add(egui::Label::new(RichText::new(t.clone()).color(c).small().strong()).truncate());
@@ -582,6 +585,10 @@ impl InstApp {
                                                 if ui.add_enabled(!self.busy, egui::Button::new("Aggiorna")).clicked() {
                                                     upd = Some(i);
                                                 }
+                                            }
+                                            let bin = egui::Button::new(RichText::new("Cestino").color(theme::ON_COLOR)).fill(theme::INSTALL);
+                                            if ui.add(bin).on_hover_text("Sposta l'installer nel Cestino").clicked() {
+                                                trash = Some(i);
                                             }
                                             if r.entry.winget_id.is_none() && ui.button("Cerca aggiornamento").clicked() {
                                                 search = Some(i);
@@ -611,6 +618,9 @@ impl InstApp {
         });
         if let Some(i) = install {
             self.run_script(i);
+        }
+        if let Some(i) = trash {
+            self.confirm_trash = Some(i);
         }
         if let Some(i) = upd {
             self.check(ctx, Some(i), true);
@@ -645,8 +655,78 @@ impl InstApp {
         }
     }
 
+    /// Conferma e spostamento di un installer (con il suo script) nel Cestino.
+    fn trash_window(&mut self, ctx: &egui::Context) {
+        let Some(i) = self.confirm_trash else {
+            return;
+        };
+        let Some(ins) = self.rows.get(i).map(|r| r.ins.clone()) else {
+            self.confirm_trash = None;
+            return;
+        };
+        let mut yes = false;
+        let mut no = false;
+        egui::Window::new("Spostare nel Cestino?")
+            .collapsible(false)
+            .resizable(false)
+            .show(ctx, |ui| {
+                ui.label(format!(
+                    "L'installer «{}» e il suo script vanno nel Cestino.",
+                    ins.name
+                ));
+                ui.label(
+                    RichText::new(ins.file.display().to_string())
+                        .color(theme::MUTED)
+                        .small(),
+                );
+                ui.horizontal(|ui| {
+                    if ui
+                        .add(
+                            egui::Button::new(
+                                RichText::new("Sposta nel Cestino")
+                                    .strong()
+                                    .color(theme::ON_COLOR),
+                            )
+                            .fill(theme::INSTALL),
+                        )
+                        .clicked()
+                    {
+                        yes = true;
+                    }
+                    if ui.button("Annulla").clicked() {
+                        no = true;
+                    }
+                });
+            });
+        if yes {
+            let root = self.root.clone();
+            match crate::liber::trash::to_recycle_bin(&root, &ins.file) {
+                Ok(()) => {
+                    if let Some(dir) = ins.file.parent() {
+                        // Lo script silenzioso accanto all'installer non serve più.
+                        let script = dir.join(installers::script_name(&ins));
+                        if script.is_file() {
+                            let _ = crate::liber::trash::to_recycle_bin(&root, &script);
+                        }
+                    }
+                    self.store.items.remove(&ins.rel);
+                    if let Err(e) = installers::save_store(&root, &self.store) {
+                        self.say(Kind::Err, e);
+                    }
+                    self.say(Kind::Ok, format!("{}: spostato nel Cestino", ins.name));
+                    self.load(ctx);
+                }
+                Err(e) => self.say(Kind::Err, format!("{}: {e}", ins.name)),
+            }
+        }
+        if yes || no {
+            self.confirm_trash = None;
+        }
+    }
+
     /// Finestre di dialogo (associazione winget e parametri).
     pub fn windows(&mut self, ctx: &egui::Context) {
+        self.trash_window(ctx);
         let mut do_search: Option<String> = None;
         let mut chosen: Option<(usize, String)> = None;
         let mut close = false;

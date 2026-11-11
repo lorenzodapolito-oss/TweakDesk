@@ -2673,7 +2673,7 @@ checksum = "db97caf9d906fbde555dd62fa95ddba9eecfd14cb388e4f491a66d74cd5fb79a"
 
 [[package]]
 name = "tweakdesk"
-version = "2.5.1"
+version = "2.6.0"
 dependencies = [
  "chrono",
  "eframe",
