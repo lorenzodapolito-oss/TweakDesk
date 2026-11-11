@@ -250,6 +250,17 @@ pub fn apply(
     sys: &dyn Sys,
     log: &mut dyn FnMut(Kind, &str),
 ) -> (Report, Vec<Undo>) {
+    apply_with_progress(items, t, sys, log, &mut |_, _| {})
+}
+
+/// Come `apply`, e chiama `progress(fatte, totali)` prima di ogni voce e alla fine.
+pub fn apply_with_progress(
+    items: &[&Item],
+    t: &Target,
+    sys: &dyn Sys,
+    log: &mut dyn FnMut(Kind, &str),
+    progress: &mut dyn FnMut(usize, usize),
+) -> (Report, Vec<Undo>) {
     let mut rep = Report::default();
     let mut undo = Vec::new();
     if let Err(e) = t.load_hives(sys) {
@@ -257,7 +268,9 @@ pub fn apply(
         rep.failed = items.len();
         return (rep, undo);
     }
-    for item in items {
+    let total = items.len();
+    for (n, item) in items.iter().enumerate() {
+        progress(n, total);
         let mut applied = false;
         let mut failed: Option<String> = None;
         for act in item.acts {
@@ -286,6 +299,7 @@ pub fn apply(
             }
         }
     }
+    progress(total, total);
     t.unload_hives(sys);
     (rep, undo)
 }
@@ -604,5 +618,32 @@ mod tests {
             b"new"
         );
         let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn progress_is_reported_per_item_and_at_the_end() {
+        let sys = FakeSys::default();
+        let mut seen = Vec::new();
+        apply_with_progress(
+            &[item("ad_id"), item("ext")],
+            &online(),
+            &sys,
+            &mut noop(),
+            &mut |n, t| seen.push((n, t)),
+        );
+        assert_eq!(seen, vec![(0, 2), (1, 2), (2, 2)]);
+    }
+
+    #[test]
+    fn dark_item_keeps_apps_light_and_windows_dark() {
+        let sys = FakeSys::default();
+        let (rep, _) = apply(&[item("dark")], &online(), &sys, &mut noop());
+        assert_eq!(rep.done, 1);
+        let all = sys.commands.borrow().join("\n");
+        assert!(
+            all.contains("SystemUsesLightTheme /t REG_DWORD /d 0"),
+            "{all}"
+        );
+        assert!(all.contains("AppsUseLightTheme /t REG_DWORD /d 1"), "{all}");
     }
 }

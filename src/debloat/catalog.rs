@@ -285,7 +285,8 @@ pub const ITEMS: &[Item] = &[
         d(ADV, "Start_IrisRecommendations", "0"),
         d("HKLM\\SOFTWARE\\Policies\\Microsoft\\Windows\\Explorer", "HideRecommendedSection", "1"),
     ]),
-    it("dark", Interfaccia, Standard, "Tema scuro", "", Both, &[d(PERS, "AppsUseLightTheme", "0"), d(PERS, "SystemUsesLightTheme", "0")]),
+    // Colore personalizzato: Windows (barra, Start) scuro e app chiare.
+    it("dark", Interfaccia, Standard, "Windows scuro, app chiare", "", Both, &[d(PERS, "AppsUseLightTheme", "1"), d(PERS, "SystemUsesLightTheme", "0")]),
     it("hidden", Interfaccia, Standard, "File nascosti visibili", "", Both, &[d(ADV, "Hidden", "1")]),
     // ---------- Prestazioni ----------
     it("fx", Prestazioni, Sicuro, "Effetti visivi ridotti", "", Both, &[

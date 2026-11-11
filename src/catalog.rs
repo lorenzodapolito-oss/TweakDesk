@@ -140,7 +140,7 @@ pub fn catalog() -> Vec<Entry> {
         Some(1),
     );
     c.dw(
-        "Tema scuro per il sistema",
+        "Windows scuro (barra e Start)",
         &format!("{CV}\\Themes\\Personalize"),
         "SystemUsesLightTheme",
         0,

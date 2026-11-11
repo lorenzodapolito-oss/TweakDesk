@@ -178,11 +178,14 @@ pub fn import_reg_as_admin(path: &Path) -> Result<(), String> {
             "Start-Process -FilePath reg.exe -ArgumentList 'import','\"{}\"' -Verb RunAs -Wait",
             path.display()
         );
-        std::process::Command::new("powershell")
-            .args(["-NoProfile", "-Command", &arg])
-            .spawn()
-            .map(|_| ())
-            .map_err(|e| format!("PowerShell non avviabile: {e}"))
+        crate::clean::sys::quiet(std::process::Command::new("powershell").args([
+            "-NoProfile",
+            "-Command",
+            &arg,
+        ]))
+        .spawn()
+        .map(|_| ())
+        .map_err(|e| format!("PowerShell non avviabile: {e}"))
     }
     #[cfg(not(windows))]
     {

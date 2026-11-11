@@ -286,9 +286,12 @@ impl CleanPanel {
             "Start-Process -FilePath '{}' -Verb RunAs",
             exe.display().to_string().replace('\'', "''")
         );
-        match std::process::Command::new("powershell")
-            .args(["-NoProfile", "-Command", &cmd])
-            .spawn()
+        match crate::clean::sys::quiet(std::process::Command::new("powershell").args([
+            "-NoProfile",
+            "-Command",
+            &cmd,
+        ]))
+        .spawn()
         {
             Ok(_) => ctx.send_viewport_cmd(egui::ViewportCommand::Close),
             Err(e) => self.say(

@@ -236,8 +236,7 @@ pub fn is_admin() -> bool {
     #[cfg(windows)]
     {
         use std::process::{Command, Stdio};
-        Command::new("net")
-            .arg("session")
+        crate::clean::sys::quiet(Command::new("net").arg("session"))
             .stdout(Stdio::null())
             .stderr(Stdio::null())
             .status()
@@ -255,11 +254,13 @@ pub fn launch(kind: Kind, path: &Path, admin: bool) -> Result<(), String> {
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
-        std::process::Command::new(prog)
-            .raw_arg(args)
-            .spawn()
-            .map(|_| ())
-            .map_err(|e| format!("{prog}: {e}"))
+        let mut c = std::process::Command::new(prog);
+        c.raw_arg(args);
+        // La finestra dello script la apre Start-Process: il PowerShell che la lancia resta nascosto.
+        if prog == "powershell" {
+            crate::clean::sys::quiet(&mut c);
+        }
+        c.spawn().map(|_| ()).map_err(|e| format!("{prog}: {e}"))
     }
     #[cfg(not(windows))]
     {

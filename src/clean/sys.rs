@@ -41,12 +41,20 @@ pub fn parse_reg_query(text: &str) -> Vec<RegItem> {
 
 pub struct RealSys;
 
+/// Evita la finestra nera dei programmi a console (PowerShell, reg, dism…). Solo Windows.
+pub fn quiet(cmd: &mut Command) -> &mut Command {
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(0x0800_0000);
+    }
+    cmd
+}
+
 fn exec(program: &str, args: &[&str]) -> Result<String, String> {
-    let out = Command::new(program)
-        .args(args)
-        .stdin(Stdio::null())
-        .output()
-        .map_err(|e| format!("{program}: {e}"))?;
+    let mut cmd = Command::new(program);
+    quiet(cmd.args(args).stdin(Stdio::null()));
+    let out = cmd.output().map_err(|e| format!("{program}: {e}"))?;
     let text = format!(
         "{}{}",
         String::from_utf8_lossy(&out.stdout),

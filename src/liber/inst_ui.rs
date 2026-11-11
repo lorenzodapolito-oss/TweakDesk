@@ -393,9 +393,12 @@ impl InstApp {
                 let path = p.to_string_lossy().replace('\'', "''");
                 let cmd = format!("Start-Process -FilePath '{path}' -Verb RunAs");
                 let name = r.ins.name.clone();
-                match std::process::Command::new("powershell")
-                    .args(["-NoProfile", "-Command", cmd.as_str()])
-                    .spawn()
+                match crate::clean::sys::quiet(std::process::Command::new("powershell").args([
+                    "-NoProfile",
+                    "-Command",
+                    cmd.as_str(),
+                ]))
+                .spawn()
                 {
                     Ok(_) => self.say(
                         Kind::Info,

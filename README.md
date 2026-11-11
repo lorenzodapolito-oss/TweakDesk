@@ -72,3 +72,9 @@ In «Estensioni Chrome» scegli **«Estrai dal profilo»** (nome, account Google
 ## Schede (2.5)
 
 Sei schede: **Debloat** (sotto-schede: Singole impostazioni, Script di configurazione, Rimozione app e funzioni, Script di ottimizzazione: tutto ciò che modifica il Windows in uso), **ISO Lite di Windows** (UUP dump, aggiornamenti, rimozione app e creazione dell'ISO), **Programmi**, **Estensioni Chrome**, **Pulizia e avvio**, **Backup di sistema**.
+
+## 2.6
+
+- Nessuna finestra PowerShell/console durante Debloat, Pulizia, Backup e gli avvii come amministratore (solo gli script che scegli di lanciare aprono la loro finestra).
+- Debloat: barra di avanzamento «n di m voci» mentre applica le modifiche.
+- Il tema ora è «Windows scuro, app chiare» (modalità colore personalizzata): non rende più scure le app.

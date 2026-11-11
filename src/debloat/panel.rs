@@ -20,6 +20,7 @@ use std::sync::mpsc::{channel, Receiver, Sender};
 
 enum Event {
     Log(Kind, String),
+    Progress(usize, usize),
     Editions(Result<Vec<Edition>, String>),
     Oscdimg(PathBuf),
     IsoIn(PathBuf),
@@ -59,6 +60,8 @@ pub struct DebloatPanel {
     iso_items: Checked,
     log: Vec<(Color32, String)>,
     busy: bool,
+    /// Avanzamento (fatte, totali) dell'applicazione delle voci.
+    progress: Option<(usize, usize)>,
     tx: Sender<Event>,
     rx: Receiver<Event>,
     is_admin: bool,
@@ -97,6 +100,7 @@ impl DebloatPanel {
             iso_items: preset(true, Some(Level::Standard)),
             log: Vec::new(),
             busy: false,
+            progress: None,
             tx,
             rx,
             is_admin: RealSys.is_admin(),
@@ -158,13 +162,18 @@ impl DebloatPanel {
                 },
                 Event::IsoIn(p) => self.iso_in = p.to_string_lossy().to_string(),
                 Event::Oscdimg(p) => self.oscdimg = p.to_string_lossy().to_string(),
-                Event::Finished => self.busy = false,
+                Event::Progress(n, t) => self.progress = Some((n, t)),
+                Event::Finished => {
+                    self.busy = false;
+                    self.progress = None;
+                }
             }
         }
     }
 
     fn spawn(&mut self, ctx: &egui::Context, job: impl FnOnce(&Sender<Event>) + Send + 'static) {
         self.busy = true;
+        self.progress = None;
         let tx = self.tx.clone();
         let ctx = ctx.clone();
         std::thread::spawn(move || {
@@ -187,9 +196,18 @@ impl DebloatPanel {
             let root = std::env::var("SystemRoot").unwrap_or_else(|_| "C:\\Windows".into());
             let target = Target::online(PathBuf::from(root));
             let t2 = tx.clone();
-            let (rep, undo) = apply::apply(&items, &target, &RealSys, &mut |k, m| {
-                let _ = t2.send(Event::Log(k, m.to_string()));
-            });
+            let t3 = tx.clone();
+            let (rep, undo) = apply::apply_with_progress(
+                &items,
+                &target,
+                &RealSys,
+                &mut |k, m| {
+                    let _ = t2.send(Event::Log(k, m.to_string()));
+                },
+                &mut |n, t| {
+                    let _ = t3.send(Event::Progress(n, t));
+                },
+            );
             let stamp = chrono::Local::now().format("%Y%m%d-%H%M%S");
             let file = app_dir().join("BackupDebloat").join(format!("annulla-{stamp}.json"));
             let msg = match apply::save_undo(&undo, &file) {
@@ -692,11 +710,21 @@ impl DebloatPanel {
         self.log.extend(msgs);
         let ctx = ui.ctx().clone();
         if self.busy {
-            egui::Panel::top("debloat_top").show(ui, |ui| {
-                ui.horizontal(|ui| {
-                    ui.spinner();
-                    ui.label(RichText::new("Lavoro in corso…").color(theme::MUTED));
-                });
+            egui::Panel::top("debloat_top").show(ui, |ui| match self.progress {
+                Some((n, t)) if t > 0 => {
+                    let frac = n as f32 / t as f32;
+                    ui.add(
+                        egui::ProgressBar::new(frac)
+                            .fill(theme::DOWNLOAD)
+                            .text(format!("{n} di {t} voci")),
+                    );
+                }
+                _ => {
+                    ui.horizontal(|ui| {
+                        ui.spinner();
+                        ui.label(RichText::new("Lavoro in corso…").color(theme::MUTED));
+                    });
+                }
             });
         }
         egui::Panel::bottom("debloat_log").show(ui, |ui| {
