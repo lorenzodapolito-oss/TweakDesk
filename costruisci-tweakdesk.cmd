@@ -3,7 +3,10 @@ rem Scarica (o aggiorna) e compila TweakDesk. Metti questo file in AmbienteRust.
 title Costruisci TweakDesk
 set "ROOT=%~dp0"
 if "%ROOT:~-1%"=="\" set "ROOT=%ROOT:~0,-1%"
-set "CARGO_HOME=%ROOT%\rust\cargo"
+rem I pacchetti vanno estratti su un disco NTFS: exFAT/FAT32 (chiavette, dischi USB) non accettano le date
+rem 1970 dei pacchetti e cargo fallisce con "failed to set mtime". Toolchain e programmi restano nella cartella.
+set "CARGO_HOME=%LOCALAPPDATA%\AmbienteRust-cargo"
+if not exist "%CARGO_HOME%" mkdir "%CARGO_HOME%"
 set "RUSTUP_HOME=%ROOT%\rust\rustup"
 rem Usa direttamente cargo e rustc della toolchain: non serve rustup (che su un PC nuovo prova a riscaricarla).
 set "TC="
