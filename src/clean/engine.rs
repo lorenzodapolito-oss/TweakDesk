@@ -307,7 +307,15 @@ pub fn clean(target: &Target, env: &dyn Env, sys: &dyn Sys) -> Outcome {
         out.error = Some("richiede i permessi di amministratore".into());
         return out;
     }
-    for s in target.services {
+    // Ferma solo i servizi che girano e li riaccende solo se girano: un servizio spento
+    // (per esempio Windows Update bloccato dall'utente) non deve mai essere avviato da qui.
+    let running: Vec<&str> = target
+        .services
+        .iter()
+        .copied()
+        .filter(|s| is_running(sys, s))
+        .collect();
+    for s in &running {
         let _ = sys.run("net", &["stop", s]);
     }
     for item in target.items {
@@ -343,10 +351,16 @@ pub fn clean(target: &Target, env: &dyn Env, sys: &dyn Sys) -> Outcome {
             }
         }
     }
-    for s in target.services {
+    for s in &running {
         let _ = sys.run("net", &["start", s]);
     }
     out
+}
+
+/// True se il servizio è in esecuzione (`sc query`); nel dubbio, falso: meglio non toccarlo.
+fn is_running(sys: &dyn Sys, service: &str) -> bool {
+    sys.run("sc", &["query", service])
+        .is_ok_and(|o| o.contains("RUNNING"))
 }
 
 /// «1,5 GB», «320 KB»...
@@ -517,7 +531,7 @@ mod tests {
     }
 
     #[test]
-    fn services_are_stopped_and_restarted() {
+    fn running_services_are_stopped_and_restarted() {
         let d = tmp("svc");
         let w = d.join("Windows");
         write(&w.join("SoftwareDistribution/Download/u.cab"), 10);
@@ -526,8 +540,20 @@ mod tests {
             admin: true,
             ..FakeSys::default()
         };
+        sys.responses
+            .borrow_mut()
+            .push(("sc query wuauserv".into(), "STATE : 4  RUNNING".into()));
+        sys.responses
+            .borrow_mut()
+            .push(("sc query bits".into(), "STATE : 4  RUNNING".into()));
         clean(find("wu_cache").unwrap(), &env, &sys);
-        let cmds = sys.commands.borrow().clone();
+        let cmds: Vec<String> = sys
+            .commands
+            .borrow()
+            .iter()
+            .filter(|c| c.starts_with("net "))
+            .cloned()
+            .collect();
         assert_eq!(
             cmds,
             vec![
@@ -536,6 +562,27 @@ mod tests {
                 "net start wuauserv",
                 "net start bits"
             ]
+        );
+        let _ = fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn stopped_services_are_never_started() {
+        let d = tmp("svc_off");
+        let w = d.join("Windows");
+        write(&w.join("SoftwareDistribution/Download/u.cab"), 10);
+        let env = env_of(&[("SystemRoot", &w)]);
+        let sys = FakeSys {
+            admin: true,
+            ..FakeSys::default()
+        };
+        sys.responses
+            .borrow_mut()
+            .push(("sc query".into(), "STATE : 1  STOPPED".into()));
+        clean(find("wu_cache").unwrap(), &env, &sys);
+        assert!(
+            sys.commands.borrow().iter().all(|c| !c.starts_with("net ")),
+            "Windows Update spento deve restare spento"
         );
         let _ = fs::remove_dir_all(&d);
     }

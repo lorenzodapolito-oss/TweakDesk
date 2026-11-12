@@ -135,32 +135,10 @@ echo [2/5] RIPRISTINO SERVIZI ATTIVAZIONE
 echo ===========================================================
 echo.
 
-:: 2.1 Ripristina Windows Update
-echo [1/4] Ripristino Windows Update...
-
-sc config wuauserv start= demand >nul 2>&1
-if %errorLevel% equ 0 (echo [OK] wuauserv configurato) else (echo [WARN] wuauserv non configurato)
-
-sc config bits start= demand >nul 2>&1
-if %errorLevel% equ 0 (echo [OK] bits configurato) else (echo [WARN] bits non configurato)
-
-sc config cryptsvc start= auto >nul 2>&1
-if %errorLevel% equ 0 (echo [OK] cryptsvc configurato) else (echo [WARN] cryptsvc non configurato)
-
-:: Avvia servizi
-net start wuauserv >nul 2>&1
-if %errorLevel% equ 0 (echo [OK] wuauserv avviato) else (echo [WARN] wuauserv non avviato ^(potrebbe essere gia' attivo^))
-
-net start bits >nul 2>&1
-if %errorLevel% equ 0 (echo [OK] bits avviato) else (echo [WARN] bits non avviato ^(potrebbe essere gia' attivo^))
-
-net start cryptsvc >nul 2>&1
-if %errorLevel% equ 0 (echo [OK] cryptsvc avviato) else (echo [WARN] cryptsvc non avviato ^(potrebbe essere gia' attivo^))
-
-echo.
+:: Windows Update NON viene toccato: se e' bloccato, resta bloccato.
 
 :: 2.2 Ripristina servizi licenza
-echo [2/4] Ripristino servizi licenza...
+echo [1/3] Ripristino servizi licenza...
 
 sc config slsvc start= demand >nul 2>&1
 sc config sppsvc start= auto >nul 2>&1
@@ -175,7 +153,7 @@ if %errorLevel% equ 0 (echo [OK] sppsvc avviato) else (echo [WARN] sppsvc non av
 echo.
 
 :: 2.3 Reset licenza
-echo [3/4] Reset licenza Windows...
+echo [2/3] Reset licenza Windows...
 
 cscript //nologo %windir%\system32\slmgr.vbs /rilc >nul 2>&1
 if %errorLevel% equ 0 (

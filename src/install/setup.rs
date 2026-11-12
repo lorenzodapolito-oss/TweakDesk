@@ -62,7 +62,7 @@ pub const SCRIPTS: &[Script] = &[
     Script {
         group: "Configurazione di sistema",
         label: "Italiano + orario",
-        desc: "Installa la lingua italiana, imposta il fuso orario e la sincronizzazione NTP.",
+        desc: "Installa la lingua italiana, imposta il fuso orario e la sincronizzazione NTP. Attenzione: i pacchetti lingua si scaricano da Windows Update, quindi può avviarlo.",
         file: "Italiano.bat",
         kind: Kind::Bat,
         impact: Impact::Normal,
@@ -418,6 +418,24 @@ mod tests {
                 assert!(a.contains(&format!("[HKEY_CLASSES_ROOT\\{k}]")), "{k}");
                 assert!(r.contains(&format!("[-HKEY_CLASSES_ROOT\\{k}]")), "{k}");
             }
+        }
+    }
+
+    #[test]
+    fn activation_script_never_restarts_windows_update() {
+        let a = SCRIPTS
+            .iter()
+            .find(|s| s.file == "Attivazione.bat")
+            .and_then(|s| s.bytes)
+            .map(|b| String::from_utf8_lossy(b).to_lowercase())
+            .unwrap_or_default();
+        assert!(!a.is_empty());
+        for svc in ["wuauserv", "usosvc", "bits"] {
+            assert!(
+                !a.contains(&format!("sc config {svc}"))
+                    && !a.contains(&format!("net start {svc}")),
+                "{svc}"
+            );
         }
     }
 }
