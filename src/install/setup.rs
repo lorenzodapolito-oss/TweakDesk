@@ -97,8 +97,8 @@ pub const SCRIPTS: &[Script] = &[
     },
     Script {
         group: "Cartelle utente",
-        label: "Sposta cartelle su D:",
-        desc: "Sposta Desktop, Documenti, Immagini, Musica, Video e Download su D:. I duplicati su C: vengono eliminati.",
+        label: "Sposta cartelle su un altro disco",
+        desc: "Sposta Desktop, Documenti, Immagini, Musica, Video e Download sul disco che scegli (di solito D:) e cambia le cartelle di Windows. I duplicati su C: vengono eliminati.",
         file: "SpostaCartelleUtente.bat",
         kind: Kind::Bat,
         impact: Impact::High,
@@ -499,5 +499,29 @@ mod tests {
         prepare(s, &d).unwrap();
         assert!(d.join("Lingue").is_dir());
         let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn move_folders_script_reads_registry_and_updates_it() {
+        let t = script_text("SpostaCartelleUtente.bat");
+        assert!(t.is_ascii());
+        assert_eq!(t.matches("\n#PS#START").count(), 1);
+        // I nomi dei valori del registro, non i nomi di Shell.Application (che non funzionavano).
+        assert!(!t.contains("Shell.Application"));
+        for v in [
+            "'Personal'",
+            "'My Pictures'",
+            "'My Music'",
+            "'My Video'",
+            "'Desktop'",
+        ] {
+            assert!(t.contains(v), "{v}");
+        }
+        assert!(t.contains("374DE290-123F-4565-9164-39C4925E467B"));
+        // Il registro si aggiorna sempre (User Shell Folders contiene %USERPROFILE%, non il percorso).
+        assert!(t.contains("Set-ItemProperty -LiteralPath $usf") && t.contains("ExpandString"));
+        assert!(t.contains("DoNotExpandEnvironmentNames"));
+        // Se lo spostamento fallisce non si cambia il registro e non si cancella nulla.
+        assert!(t.contains("$rc -ge 8") && t.contains("robocopy"));
     }
 }

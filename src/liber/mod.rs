@@ -6,6 +6,7 @@ pub mod catalog;
 pub mod config;
 pub mod describe;
 pub mod github;
+pub mod icons;
 pub mod inst_ui;
 pub mod inst_update;
 pub mod installers;

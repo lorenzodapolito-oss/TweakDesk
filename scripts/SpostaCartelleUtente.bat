@@ -1,116 +1,100 @@
 @echo off
 chcp 65001 >nul
+title Sposta le cartelle utente
 setlocal
 
-:: ============================================
-:: Controlla privilegi amministratore
-:: ============================================
 net session >nul 2>&1
-if %errorlevel% neq 0 (
-    echo Devi eseguire questo BAT come amministratore!
-    pause
-    exit /b
-)
-
-:: ============================================
-:: Controlla che D: esista
-:: ============================================
-if not exist "D:\" (
-    echo ERRORE: Il disco D: non esiste o non e' accessibile!
-    pause
+if errorlevel 1 (
+    echo Richiedo privilegi amministratore...
+    powershell -NoProfile -Command "Start-Process '%~f0' -Verb RunAs"
     exit /b
 )
 
 echo.
 echo ============================================
-echo   Spostamento cartelle utente da C a D
+echo   Spostamento cartelle utente su un altro disco
 echo ============================================
 echo.
 echo   Utente corrente: %USERNAME%
-echo   Destinazione:    D:\^<NomeCartella^>
 echo.
-echo   Cartelle che verranno spostate:
-echo     - Desktop
-echo     - Documenti
-echo     - Immagini
-echo     - Musica
-echo     - Video
-echo     - Download
+echo   Cartelle: Desktop, Documenti, Immagini, Musica, Video, Download
 echo.
 echo   REGOLE:
-echo     - File non presenti su D: vengono spostati
-echo     - Duplicati: vince D:, il file su C viene eliminato
+echo     - I file non presenti nella destinazione vengono spostati
+echo     - Duplicati: vince la destinazione, la copia su C: viene eliminata
 echo     - AppData e il resto del profilo NON vengono toccati
 echo.
-echo   Assicurati di avere abbastanza spazio su D:
+set "DISCO=D"
+set /p "DISCO=Lettera del disco di destinazione [D]: "
+set "DISCO=%DISCO:~0,1%"
+if not exist "%DISCO%:\" (
+    echo.
+    echo ERRORE: il disco %DISCO%: non esiste o non e' accessibile.
+    pause
+    exit /b 1
+)
+set "DESTROOT=%DISCO%:"
+echo.
+echo   Destinazione: %DESTROOT%\Desktop, %DESTROOT%\Documenti, ...
+echo   Controlla di avere abbastanza spazio libero sul disco %DISCO%:.
 echo.
 pause
 
-echo.
-echo Avvio spostamento...
-echo.
-
-powershell -NoProfile -ExecutionPolicy Bypass -Command ^
-  "$folders = @(" ^
-  "  @{ Name='Desktop';   Shell='Desktop';           Dest='D:\Desktop'   }," ^
-  "  @{ Name='Documenti'; Shell='Personal';          Dest='D:\Documenti' }," ^
-  "  @{ Name='Immagini';  Shell='My Pictures';       Dest='D:\Immagini'  }," ^
-  "  @{ Name='Musica';    Shell='My Music';          Dest='D:\Musica'    }," ^
-  "  @{ Name='Video';     Shell='My Video';          Dest='D:\Video'     }," ^
-  "  @{ Name='Download';  Shell='{374DE290-123F-4565-9164-39C4925E467B}'; Dest='D:\Download' }" ^
-  ");" ^
-  "foreach ($f in $folders) {" ^
-  "  $dest = $f.Dest;" ^
-  "  Write-Host \"=== $($f.Name) ===\" -ForegroundColor Cyan;" ^
-  "  $shell = New-Object -ComObject Shell.Application;" ^
-  "  $ns = $shell.Namespace($f.Shell);" ^
-  "  if ($ns -ne $null) { $current = $ns.Self.Path } else { $current = $null };" ^
-  "  if (-not $current -or -not (Test-Path $current)) { Write-Host \"  Cartella sorgente non trovata, saltata.\" -ForegroundColor Yellow; Write-Host; continue };" ^
-  "  if ($current -eq $dest) { Write-Host \"  Gia' in $dest - saltata.\" -ForegroundColor Yellow; Write-Host; continue };" ^
-  "  if (-not (Test-Path $dest)) { New-Item -ItemType Directory -Path $dest -Force | Out-Null; Write-Host \"  Cartella creata: $dest\" -ForegroundColor Green };" ^
-  "  $files = Get-ChildItem -Path $current -Recurse -Force;" ^
-  "  $moved = 0; $skipped = 0; $deleted = 0;" ^
-  "  foreach ($item in $files) {" ^
-  "    $relative = $item.FullName.Substring($current.Length).TrimStart('\');" ^
-  "    $target = Join-Path $dest $relative;" ^
-  "    if ($item.PSIsContainer) {" ^
-  "      if (-not (Test-Path $target)) { New-Item -ItemType Directory -Path $target -Force | Out-Null }" ^
-  "    } else {" ^
-  "      if (Test-Path $target) {" ^
-  "        Remove-Item -Path $item.FullName -Force -ErrorAction SilentlyContinue;" ^
-  "        $skipped++; $deleted++;" ^
-  "        Write-Host \"  DUPLICATO eliminato da C: $relative\" -ForegroundColor Yellow" ^
-  "      } else {" ^
-  "        Move-Item -Path $item.FullName -Destination $target -Force -ErrorAction SilentlyContinue;" ^
-  "        $moved++" ^
-  "      }" ^
-  "    }" ^
-  "  };" ^
-  "  Get-ChildItem -Path $current -Recurse -Force | Where-Object { $_.PSIsContainer } | Sort-Object FullName -Descending | ForEach-Object { if (-not (Get-ChildItem $_.FullName -Force)) { Remove-Item $_.FullName -Force -ErrorAction SilentlyContinue } };" ^
-  "  if (-not (Get-ChildItem $current -Force)) { Remove-Item $current -Force -ErrorAction SilentlyContinue; Write-Host \"  Cartella sorgente rimossa: $current\" -ForegroundColor Green };" ^
-  "  $regPaths = @(" ^
-  "    'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\User Shell Folders'," ^
-  "    'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\Shell Folders'" ^
-  "  );" ^
-  "  foreach ($reg in $regPaths) {" ^
-  "    $props = Get-ItemProperty $reg -ErrorAction SilentlyContinue;" ^
-  "    if ($props) {" ^
-  "      $props.PSObject.Properties | Where-Object { $_.Value -eq $current } | ForEach-Object {" ^
-  "        Set-ItemProperty -Path $reg -Name $_.Name -Value $dest;" ^
-  "        Write-Host \"  Registro aggiornato: $($_.Name) -> $dest\" -ForegroundColor Green" ^
-  "      }" ^
-  "    }" ^
-  "  };" ^
-  "  Write-Host \"  Spostati: $moved  |  Duplicati eliminati da C: $deleted\" -ForegroundColor Green;" ^
-  "  Write-Host \"  OK: $($f.Name) -> $dest\" -ForegroundColor Green; Write-Host" ^
-  "}"
+powershell -NoProfile -ExecutionPolicy Bypass -Command "$t=[IO.File]::ReadAllText('%~f0'); Invoke-Expression $t.Substring($t.IndexOf('#PS'+'#START'))"
 
 echo.
 echo ============================================
 echo   Operazione completata.
-echo   Su C: rimane solo AppData e il profilo
-echo   di sistema. Riavvia il PC per applicare
-echo   tutte le modifiche.
+echo   Riavvia il PC per applicare tutte le modifiche.
 echo ============================================
 echo.
 pause
+exit /b
+
+#PS#START
+$root = $env:DESTROOT
+$items = @(
+    @{ N = 'Desktop';   V = 'Desktop';     D = 'Desktop'   },
+    @{ N = 'Documenti'; V = 'Personal';    D = 'Documenti' },
+    @{ N = 'Immagini';  V = 'My Pictures'; D = 'Immagini'  },
+    @{ N = 'Musica';    V = 'My Music';    D = 'Musica'    },
+    @{ N = 'Video';     V = 'My Video';    D = 'Video'     },
+    @{ N = 'Download';  V = '{374DE290-123F-4565-9164-39C4925E467B}'; D = 'Download' }
+)
+$usf = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\User Shell Folders'
+$sf  = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\Shell Folders'
+$key = Get-Item -LiteralPath $usf
+function Say($t, $c = 'Gray') { Write-Host $t -ForegroundColor $c }
+
+foreach ($it in $items) {
+    Say ('=== ' + $it.N + ' ===') 'Cyan'
+    # Il percorso attuale si legge dal registro (la cartella puo' essere anche in OneDrive).
+    $raw = $key.GetValue($it.V, $null, 'DoNotExpandEnvironmentNames')
+    $cur = if ($raw) { [Environment]::ExpandEnvironmentVariables([string]$raw).TrimEnd('\') } else { $null }
+    $dest = Join-Path ($root + '\') $it.D
+    if (-not $cur -or -not (Test-Path -LiteralPath $cur)) { Say '  Cartella di origine non trovata, saltata.' 'Yellow'; continue }
+    if ($cur -ieq $dest) { Say ('  Gia in ' + $dest + ', saltata.') 'Yellow'; continue }
+    try {
+        New-Item -ItemType Directory -Path $dest -Force -ErrorAction Stop | Out-Null
+    } catch { Say ('  [ERRORE] Non riesco a creare ' + $dest + ': ' + $_.Exception.Message) 'Red'; continue }
+
+    # Sposta quello che manca nella destinazione. /XC /XN /XO: un file gia presente non viene toccato.
+    & robocopy $cur $dest /E /MOVE /XJ /XC /XN /XO /R:1 /W:1 /NFL /NDL /NJH /NJS /NP | Out-Null
+    $rc = $LASTEXITCODE
+    if ($rc -ge 8) {
+        Say ('  [ERRORE] Spostamento non riuscito (codice ' + $rc + '): il registro non viene cambiato.') 'Red'
+        continue
+    }
+    # Quello che resta nell'origine esiste gia nella destinazione: vince la destinazione.
+    $left = @(Get-ChildItem -LiteralPath $cur -Recurse -Force -File -ErrorAction SilentlyContinue)
+    if ($left.Count -gt 0) {
+        Say ('  Duplicati eliminati da C: ' + $left.Count) 'Yellow'
+        Remove-Item -LiteralPath $cur -Recurse -Force -ErrorAction SilentlyContinue
+    }
+    Remove-Item -LiteralPath $cur -Force -ErrorAction SilentlyContinue
+
+    # La cartella di Windows cambia in entrambi i punti del registro.
+    Set-ItemProperty -LiteralPath $usf -Name $it.V -Value $dest -Type ExpandString
+    Set-ItemProperty -LiteralPath $sf  -Name $it.V -Value $dest
+    Say ('  OK: ' + $it.N + ' -> ' + $dest) 'Green'
+}

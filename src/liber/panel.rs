@@ -65,6 +65,7 @@ pub struct LiberPanel {
     assoc: Option<Assoc>,
     confirm_trash: Option<usize>,
     inst: InstApp,
+    icons: crate::liber::icons::Icons,
     inst_pending: bool,
     base: PathBuf,
     cfg_path: PathBuf,
@@ -97,6 +98,14 @@ pub(crate) fn kind_color(k: Kind) -> Color32 {
 }
 
 /// Colore pastello dell'iniziale, scelto dal nome.
+/// Disegna l'icona di un programma dentro il riquadro.
+pub(crate) fn paint_icon(ui: &egui::Ui, rect: egui::Rect, tex: &egui::TextureHandle) {
+    let uv = egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0));
+    // Il bianco qui è solo il "nessun filtro" dell'immagine, non un colore visibile.
+    ui.painter()
+        .image(tex.id(), rect.shrink(5.0), uv, egui::Color32::WHITE);
+}
+
 pub(crate) fn avatar_color(name: &str) -> Color32 {
     const COLORS: [Color32; 6] = [
         Color32::from_rgb(0xFF, 0xB3, 0xDE),
@@ -174,6 +183,7 @@ impl LiberPanel {
             assoc: None,
             confirm_trash: None,
             inst,
+            icons: crate::liber::icons::Icons::default(),
             inst_pending: true,
             base,
             cfg_path,
@@ -751,8 +761,13 @@ impl LiberPanel {
                                 ui.horizontal(|ui| {
                                     let (rect, _) = ui.allocate_exact_size(egui::vec2(46.0, 46.0), egui::Sense::hover());
                                     ui.painter().rect_filled(rect, 12.0, avatar_color(&r.app.name));
-                                    let initial = r.app.name.chars().next().map(|c| c.to_uppercase().to_string()).unwrap_or_default();
-                                    ui.painter().text(rect.center(), egui::Align2::CENTER_CENTER, initial, egui::FontId::proportional(24.0), theme::TEXT);
+                                    // L'icona del programma; se non c'è (ancora), la lettera.
+                                    if let Some(tex) = r.app.exe.as_deref().and_then(|e| self.icons.get(ctx, e)) {
+                                        paint_icon(ui, rect, tex);
+                                    } else {
+                                        let initial = r.app.name.chars().next().map(|c| c.to_uppercase().to_string()).unwrap_or_default();
+                                        ui.painter().text(rect.center(), egui::Align2::CENTER_CENTER, initial, egui::FontId::proportional(24.0), theme::TEXT);
+                                    }
                                     ui.vertical(|ui| {
                                         ui.add(egui::Label::new(RichText::new(&r.app.name).strong().size(15.0)).truncate());
                                         let ver = r.local.as_deref().map_or("versione non nota".to_string(), |v| format!("versione {v}"));
@@ -849,6 +864,7 @@ impl LiberPanel {
     pub fn show(&mut self, ui: &mut egui::Ui) {
         self.pump();
         let ctx = ui.ctx().clone();
+        self.icons.tick(&ctx);
         self.inst.pump(&ctx);
         for (c, m) in self.inst.take_logs() {
             self.log.push((c, m));

@@ -2,7 +2,7 @@
 
 use crate::liber::inst_update::{self, IStatus};
 use crate::liber::installers::{self, Entry, Installer, Store};
-use crate::liber::panel::{avatar_color, group, kind_color, main_of, rank};
+use crate::liber::panel::{avatar_color, group, kind_color, main_of, paint_icon, rank};
 use crate::liber::update::Kind;
 use crate::liber::winget::{self, Pkg, RealRunner, Runner};
 use crate::theme;
@@ -114,6 +114,7 @@ struct Switches {
 }
 
 pub struct InstApp {
+    icons: crate::liber::icons::Icons,
     root: PathBuf,
     rows: Vec<IRow>,
     store: Store,
@@ -136,6 +137,7 @@ impl InstApp {
         let (tx, rx) = channel();
         let _ = std::fs::create_dir_all(&root);
         Self {
+            icons: crate::liber::icons::Icons::default(),
             root,
             rows: Vec::new(),
             store: Store::default(),
@@ -203,6 +205,7 @@ impl InstApp {
     }
 
     pub fn pump(&mut self, ctx: &egui::Context) {
+        self.icons.tick(ctx);
         let mut reload = false;
         while let Ok(ev) = self.rx.try_recv() {
             match ev {
@@ -559,8 +562,12 @@ impl InstApp {
                                         ui.horizontal(|ui| {
                                             let (rect, _) = ui.allocate_exact_size(egui::vec2(46.0, 46.0), egui::Sense::hover());
                                             ui.painter().rect_filled(rect, 12.0, avatar_color(&r.ins.name));
-                                            let c = r.ins.name.chars().next().map(|c| c.to_uppercase().to_string()).unwrap_or_default();
-                                            ui.painter().text(rect.center(), egui::Align2::CENTER_CENTER, c, egui::FontId::proportional(24.0), theme::TEXT);
+                                            if let Some(tex) = self.icons.get(ctx, &r.ins.file) {
+                                                paint_icon(ui, rect, tex);
+                                            } else {
+                                                let c = r.ins.name.chars().next().map(|c| c.to_uppercase().to_string()).unwrap_or_default();
+                                                ui.painter().text(rect.center(), egui::Align2::CENTER_CENTER, c, egui::FontId::proportional(24.0), theme::TEXT);
+                                            }
                                             ui.vertical(|ui| {
                                                 ui.add(egui::Label::new(RichText::new(&r.ins.name).strong().size(15.0)).truncate());
                                                 let kind = if r.entry.switches.is_some() { "parametri tuoi" } else { r.ins.kind.label() };
