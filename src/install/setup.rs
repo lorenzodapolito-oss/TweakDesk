@@ -62,7 +62,7 @@ pub const SCRIPTS: &[Script] = &[
     Script {
         group: "Configurazione di sistema",
         label: "Italiano + orario",
-        desc: "Installa la lingua italiana da file locali (cartella «Script\\Lingue» o ISO «Languages and Optional Features» montata): non scarica nulla e non usa Windows Update. Imposta anche fuso orario e NTP.",
+        desc: "Installa la lingua italiana (dai file in «Script\\Lingue» o da un'ISO montata; se mancano la scarica con Install-Language, che usa Windows Update solo per la lingua e non funziona se l'hai bloccato), toglie l'inglese, imposta fuso orario e NTP.",
         file: "Italiano.bat",
         kind: Kind::Bat,
         impact: Impact::Normal,
@@ -460,7 +460,12 @@ mod tests {
             t.contains("-LimitAccess") && t.contains("-Source $fodDirs"),
             "le funzioni facoltative vengono da -Source, senza Windows Update"
         );
-        assert!(!t.contains("Install-Language"));
+        // Il download via Windows Update è solo l'ultima scelta e non parte se il servizio è bloccato.
+        assert!(t.contains("Install-Language") && t.contains("StartType -eq 'Disabled'"));
+        // L'inglese si toglie solo se l'italiano è installato.
+        assert!(t.contains("Uninstall-Language -Language en-US"));
+        assert!(t.contains("Get-InstalledLanguage -Language it-IT"));
+        assert!(!t.contains("$list.Add('en-US')"));
         // Il blocco PowerShell inizia da una riga marcatore e il caricatore lo cerca senza trovarsi da solo.
         assert_eq!(t.matches("\n#PS#START").count(), 1);
         assert!(t.contains("IndexOf('#PS'+'#START')"));

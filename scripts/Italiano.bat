@@ -49,7 +49,7 @@ function Find-Files($filter) {
     }
 }
 
-Say '[1/6] Cerco i pacchetti lingua in locale...' 'Cyan'
+Say '[1/8] Cerco i pacchetti lingua in locale...' 'Cyan'
 foreach ($r in $roots) { Say ('  Cartella: ' + $r) }
 $lp   = Find-Files 'Microsoft-Windows-Client-Language-Pack_x64_it-it.cab' | Select-Object -First 1
 $lxp  = Find-Files 'LanguageExperiencePack.it-it.Neutral.appx' | Select-Object -First 1
@@ -61,7 +61,25 @@ if (-not $lp -and -not $lxp -and $fodDirs.Count -eq 0) {
 }
 
 Say ''
-Say '[2/6] Pacchetto lingua (interfaccia)...' 'Cyan'
+Say '[2/8] Download della lingua (solo se mancano i file locali)...' 'Cyan'
+if ($lp -or $lxp -or $fodDirs.Count -gt 0) {
+    Say '  [SALTATO] uso i file locali' 'Green'
+} else {
+    $wu = Get-Service wuauserv -ErrorAction SilentlyContinue
+    if ($wu -and $wu.StartType -eq 'Disabled') {
+        Say '  Windows Update e'' bloccato: non posso scaricare la lingua.' 'Yellow'
+        Say '  Metti i file in Script\Lingue, oppure lancia questo script PRIMA di "Blocca Windows Update".' 'Yellow'
+    } else {
+        try {
+            Say '  Scarico e installo it-IT con Install-Language (usa Windows Update, solo per la lingua)...'
+            Install-Language -Language it-IT -ErrorAction Stop | Out-Null
+            Say '  [OK] Lingua italiana scaricata e installata' 'Green'
+        } catch { Say ('  [WARN] ' + $_.Exception.Message) 'Yellow' }
+    }
+}
+
+Say ''
+Say '[3/8] Pacchetto lingua (interfaccia)...' 'Cyan'
 try {
     $has = Get-WindowsPackage -Online -ErrorAction Stop | Where-Object { $_.PackageName -like '*LanguagePack*it-IT*' }
     if ($has) { Say '  [PRESENTE] Language Pack it-IT' 'Green' }
@@ -72,7 +90,7 @@ try {
 } catch { Say ('  [WARN] ' + $_.Exception.Message) 'Yellow' }
 
 Say ''
-Say '[3/6] Local Experience Pack...' 'Cyan'
+Say '[4/8] Local Experience Pack...' 'Cyan'
 try {
     $has = Get-AppxProvisionedPackage -Online -ErrorAction Stop | Where-Object { $_.DisplayName -like '*LanguageExperiencePackit-IT*' }
     if ($has) { Say '  [PRESENTE] Local Experience Pack it-IT' 'Green' }
@@ -88,7 +106,7 @@ try {
 } catch { Say ('  [WARN] ' + $_.Exception.Message) 'Yellow' }
 
 Say ''
-Say '[4/6] Componenti lingua (scrittura, OCR, voce)...' 'Cyan'
+Say '[5/8] Componenti lingua (scrittura, OCR, voce)...' 'Cyan'
 $features = @(
     'Language.Basic~~~it-IT~0.0.1.0',
     'Language.Handwriting~~~it-IT~0.0.1.0',
@@ -110,12 +128,12 @@ foreach ($f in $features) {
 }
 
 Say ''
-Say '[5/6] Lingua, formati, fuso orario...' 'Cyan'
+Say '[6/8] Lingua, formati, fuso orario...' 'Cyan'
 try {
+    # Solo italiano: l'inglese non resta nell'elenco delle lingue.
     $list = New-WinUserLanguageList 'it-IT'
-    $list.Add('en-US')
     Set-WinUserLanguageList $list -Force -ErrorAction Stop
-    Say '  [OK] Lingua utente: it-IT (fallback en-US)' 'Green'
+    Say '  [OK] Lingua utente: solo it-IT' 'Green'
 } catch { Say ('  [WARN] ' + $_.Exception.Message) 'Yellow' }
 try { Set-WinSystemLocale 'it-IT' -ErrorAction Stop;       Say '  [OK] System Locale: it-IT' 'Green' } catch { Say ('  [WARN] System Locale: ' + $_.Exception.Message) 'Yellow' }
 try { Set-WinUILanguageOverride 'it-IT' -ErrorAction Stop; Say '  [OK] UI Language: it-IT' 'Green' } catch { Say ('  [WARN] UI Language: ' + $_.Exception.Message) 'Yellow' }
@@ -127,7 +145,21 @@ try {
 } catch { Say ('  [WARN] Fuso orario: ' + $_.Exception.Message) 'Yellow' }
 
 Say ''
-Say '[6/6] Sincronizzazione orario NTP...' 'Cyan'
+Say '[7/8] Rimozione dell''inglese...' 'Cyan'
+try {
+    $itOk = Get-InstalledLanguage -Language it-IT -ErrorAction Stop
+    if (-not $itOk) {
+        Say '  [SALTATO] l''italiano non risulta installato: l''inglese resta (altrimenti Windows resterebbe senza lingua).' 'Yellow'
+    } elseif (-not (Get-InstalledLanguage -Language en-US -ErrorAction SilentlyContinue)) {
+        Say '  [PRESENTE] l''inglese non e'' installato' 'Green'
+    } else {
+        Uninstall-Language -Language en-US -ErrorAction Stop | Out-Null
+        Say '  [OK] Inglese (en-US) rimosso' 'Green'
+    }
+} catch { Say ('  [WARN] Inglese non rimosso: ' + $_.Exception.Message) 'Yellow' }
+
+Say ''
+Say '[8/8] Sincronizzazione orario NTP...' 'Cyan'
 try {
     Stop-Service w32time -Force -ErrorAction SilentlyContinue
     & w32tm /unregister 2>$null | Out-Null

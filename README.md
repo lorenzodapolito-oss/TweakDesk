@@ -86,3 +86,4 @@ Sei schede: **Debloat** (sotto-schede: Script di configurazione, Rimozione app e
 - 2.6.5: «Attivazione Windows» e «Pulizia» non riavviano più Windows Update.
 - 2.7.1: la grafica usa DirectX/Vulkan (wgpu) e, solo se non c'è, OpenGL: il programma parte anche su un Windows senza driver video.
 - 2.7.2: in «Programmi» ogni app mostra la sua icona (estratta dal file .exe e salvata in `%LOCALAPPDATA%\TweakDesk\icone`) al posto della lettera; «Sposta cartelle» riscritto (leggeva male le cartelle e non aggiornava il registro), con scelta del disco.
+- 2.7.3: «Italiano + orario» scarica la lingua con Install-Language se mancano i file locali (non se Windows Update è bloccato) e toglie l'inglese solo dopo aver verificato che l'italiano sia installato.
