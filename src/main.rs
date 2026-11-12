@@ -46,8 +46,10 @@ fn report_fatal(text: &str) {
         .show();
 }
 
-fn run(open: Option<std::path::PathBuf>) -> eframe::Result {
-    let options = eframe::NativeOptions {
+/// Opzioni della finestra con il motore grafico scelto.
+fn native_options(renderer: eframe::Renderer) -> eframe::NativeOptions {
+    eframe::NativeOptions {
+        renderer,
         viewport: eframe::egui::ViewportBuilder::default()
             .with_title(format!(
                 "{} di Lorenzo D'Apolito v{}",
@@ -58,12 +60,25 @@ fn run(open: Option<std::path::PathBuf>) -> eframe::Result {
             .with_min_inner_size([800.0, 480.0])
             .with_icon(app_icon()),
         ..Default::default()
-    };
-    eframe::run_native(
-        app::APP_TITLE,
-        options,
-        Box::new(move |cc| Ok(Box::new(app::App::new(cc, open.clone())))),
-    )
+    }
+}
+
+/// Prima DirectX/Vulkan (wgpu: funziona anche senza driver video, con il rendering software
+/// di Windows), poi OpenGL. Così il programma parte anche su un Windows appena installato.
+fn run(open: Option<std::path::PathBuf>) -> eframe::Result {
+    let mut last = Ok(());
+    for renderer in [eframe::Renderer::Wgpu, eframe::Renderer::Glow] {
+        let open = open.clone();
+        last = eframe::run_native(
+            app::APP_TITLE,
+            native_options(renderer),
+            Box::new(move |cc| Ok(Box::new(app::App::new(cc, open.clone())))),
+        );
+        if last.is_ok() {
+            break;
+        }
+    }
+    last
 }
 
 fn main() {
@@ -75,7 +90,7 @@ fn main() {
     let open = std::env::args_os().nth(1).map(std::path::PathBuf::from);
     if let Err(e) = run(open) {
         report_fatal(&error_report(
-            "La finestra non si apre. Su un Windows appena installato di solito mancano i driver video (serve OpenGL): esegui Windows Update o installa i driver del produttore, poi riprova.",
+            "La finestra non si apre: non è disponibile né DirectX/Vulkan né OpenGL. Installa i driver video scaricandoli dal sito del produttore del PC o della scheda grafica (non serve Windows Update), poi riprova.",
             &e.to_string(),
         ));
     }
