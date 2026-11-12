@@ -78,3 +78,9 @@ Sei schede: **Debloat** (sotto-schede: Script di configurazione, Rimozione app e
 - Nessuna finestra PowerShell/console durante Debloat, Pulizia, Backup e gli avvii come amministratore (solo gli script che scegli di lanciare aprono la loro finestra).
 - Debloat: barra di avanzamento «n di m voci» mentre applica le modifiche.
 - Il tema ora è «Windows scuro, app chiare» (modalità colore personalizzata): non rende più scure le app.
+
+## Novità 2.7
+
+- **Blocca Windows Update** riscritto: disattiva servizi e attività, sostituisce i programmi di aggiornamento (UsoClient, MoUsoCoreWorker, WaaSMedicAgent, SIHClient, wuauclt), imposta criteri e un server inesistente, blocca hosts e firewall e crea un controllo all'avvio e ogni ora che rimette il blocco. Non esiste uno script di ripristino. Conseguenza: niente aggiornamenti di sicurezza, nemmeno per Microsoft Defender.
+- **Italiano + orario** installa la lingua solo da file locali, senza scaricare nulla e senza Windows Update: cerca in `Script\Lingue` (la cartella viene creata) e nelle ISO «Languages and Optional Features» / «Language Pack» montate. Servono i file .cab/.appx italiani di Windows 11, che non si possono includere nel programma perché sono di Microsoft.
+- 2.6.5: «Attivazione Windows» e «Pulizia» non riavviano più Windows Update.

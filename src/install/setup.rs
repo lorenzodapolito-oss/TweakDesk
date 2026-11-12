@@ -62,7 +62,7 @@ pub const SCRIPTS: &[Script] = &[
     Script {
         group: "Configurazione di sistema",
         label: "Italiano + orario",
-        desc: "Installa la lingua italiana, imposta il fuso orario e la sincronizzazione NTP. Attenzione: i pacchetti lingua si scaricano da Windows Update, quindi può avviarlo.",
+        desc: "Installa la lingua italiana da file locali (cartella «Script\\Lingue» o ISO «Languages and Optional Features» montata): non scarica nulla e non usa Windows Update. Imposta anche fuso orario e NTP.",
         file: "Italiano.bat",
         kind: Kind::Bat,
         impact: Impact::Normal,
@@ -89,7 +89,7 @@ pub const SCRIPTS: &[Script] = &[
     Script {
         group: OPTIMIZE_GROUP,
         label: "Blocca Windows Update",
-        desc: "Disattiva Windows Update in modo aggressivo: servizi, attività, permessi, file di sistema rinominati, firewall e hosts.",
+        desc: "Blocca Windows Update in modo definitivo: servizi, attività, WaaSMedic, programmi di aggiornamento, criteri, hosts e firewall, con un controllo orario che rimette il blocco. Nessun ripristino.",
         file: "updateKill.bat",
         kind: Kind::Bat,
         impact: Impact::High,
@@ -206,7 +206,11 @@ pub fn prepare(s: &Script, dir: &Path) -> Result<PathBuf, String> {
             } else {
                 b.to_vec()
             };
-            std::fs::write(&path, data).map_err(|e| format!("{}: {e}", path.display()))?
+            std::fs::write(&path, data).map_err(|e| format!("{}: {e}", path.display()))?;
+            if s.file == "Italiano.bat" {
+                // Dove l'utente mette i pacchetti lingua da installare.
+                let _ = std::fs::create_dir_all(dir.join("Lingue"));
+            }
         }
         None if path.is_file() => {}
         None => {
@@ -437,5 +441,63 @@ mod tests {
                 "{svc}"
             );
         }
+    }
+
+    fn script_text(file: &str) -> String {
+        SCRIPTS
+            .iter()
+            .find(|s| s.file == file)
+            .and_then(|s| s.bytes)
+            .map(|b| String::from_utf8_lossy(b).into_owned())
+            .unwrap_or_default()
+    }
+
+    #[test]
+    fn italian_script_installs_only_from_local_files() {
+        let t = script_text("Italiano.bat");
+        assert!(!t.is_empty());
+        assert!(
+            t.contains("-LimitAccess") && t.contains("-Source $fodDirs"),
+            "le funzioni facoltative vengono da -Source, senza Windows Update"
+        );
+        assert!(!t.contains("Install-Language"));
+        // Il blocco PowerShell inizia da una riga marcatore e il caricatore lo cerca senza trovarsi da solo.
+        assert_eq!(t.matches("\n#PS#START").count(), 1);
+        assert!(t.contains("IndexOf('#PS'+'#START')"));
+        assert!(t.contains("Add-WindowsPackage") && t.contains("Add-AppxProvisionedPackage"));
+        // Tutto ASCII: cmd legge il file nella tabella dei caratteri del sistema.
+        assert!(t.is_ascii());
+    }
+
+    #[test]
+    fn update_block_is_thorough_and_has_no_undo() {
+        let t = script_text("updateKill.bat");
+        for needle in [
+            "Image File Execution Options",
+            "wuauserv",
+            "UsoSvc",
+            "WaaSMedicSvc",
+            "Disable-ScheduledTask",
+            "schtasks /create",
+            "/guard",
+            "NoAutoUpdate",
+            "BLOCCO_WU_",
+        ] {
+            assert!(t.contains(needle), "{needle}");
+        }
+        // Il gruppo Amministratori si chiama in modo diverso nelle varie lingue: si usa l'SID.
+        assert!(t.contains("*S-1-5-32-544") && !t.contains("Administrators:F"));
+        let lower = t.to_lowercase();
+        assert!(!lower.contains("start= demand") && !lower.contains("start= auto"));
+        assert!(t.is_ascii());
+    }
+
+    #[test]
+    fn preparing_italian_script_creates_the_packs_folder() {
+        let d = std::env::temp_dir().join(format!("td_lingue_{}", std::process::id()));
+        let s = SCRIPTS.iter().find(|s| s.file == "Italiano.bat").unwrap();
+        prepare(s, &d).unwrap();
+        assert!(d.join("Lingue").is_dir());
+        let _ = std::fs::remove_dir_all(&d);
     }
 }
