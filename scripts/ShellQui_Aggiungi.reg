@@ -1,0 +1,31 @@
+Windows Registry Editor Version 5.00
+
+; Voci "Apri PowerShell qui" e "Apri Prompt dei comandi qui" nel tasto destro (sfondo e cartelle).
+
+[HKEY_CLASSES_ROOT\Directory\Background\shell\OpenPowerShellHere]
+@="Apri PowerShell qui"
+"Icon"="powershell.exe"
+
+[HKEY_CLASSES_ROOT\Directory\Background\shell\OpenPowerShellHere\command]
+@="powershell.exe -NoExit -Command Set-Location -LiteralPath '%V'"
+
+[HKEY_CLASSES_ROOT\Directory\Background\shell\OpenCmdHere]
+@="Apri Prompt dei comandi qui"
+"Icon"="cmd.exe"
+
+[HKEY_CLASSES_ROOT\Directory\Background\shell\OpenCmdHere\command]
+@="cmd.exe /s /k pushd \"%V\""
+
+[HKEY_CLASSES_ROOT\Directory\shell\OpenPowerShellHere]
+@="Apri PowerShell qui"
+"Icon"="powershell.exe"
+
+[HKEY_CLASSES_ROOT\Directory\shell\OpenPowerShellHere\command]
+@="powershell.exe -NoExit -Command Set-Location -LiteralPath '%V'"
+
+[HKEY_CLASSES_ROOT\Directory\shell\OpenCmdHere]
+@="Apri Prompt dei comandi qui"
+"Icon"="cmd.exe"
+
+[HKEY_CLASSES_ROOT\Directory\shell\OpenCmdHere\command]
+@="cmd.exe /s /k pushd \"%V\""

@@ -65,13 +65,13 @@ In «Estensioni Chrome» scegli **«Estrai dal profilo»** (nome, account Google
 
 ## Schede riorganizzate (2.4)
 
-- **Impostazioni di Windows**: due sotto-schede, «Singole impostazioni» (il catalogo di opzioni) e «Script di configurazione» (lingua, cartelle utente, Start, taskbar, attivazione, extra).
+- **Impostazioni di Windows**: due sotto-schede, «Script di configurazione» (lingua, cartelle utente, Start, taskbar, attivazione, extra, voci «Apri PowerShell/Prompt qui» nel tasto destro) e «Singole impostazioni» (il catalogo di opzioni, ultima).
 - **Debloat e ottimizzazione**: nuova sotto-scheda «Script di ottimizzazione» con «Ottimizza Windows» e «Blocca Windows Update».
 - La scheda «Configurazione di Windows» non esiste più; le schede in alto sono 6.
 
 ## Schede (2.5)
 
-Sei schede: **Debloat** (sotto-schede: Singole impostazioni, Script di configurazione, Rimozione app e funzioni, Script di ottimizzazione: tutto ciò che modifica il Windows in uso), **ISO Lite di Windows** (UUP dump, aggiornamenti, rimozione app e creazione dell'ISO), **Programmi**, **Estensioni Chrome**, **Pulizia e avvio**, **Backup di sistema**.
+Sei schede: **Debloat** (sotto-schede: Script di configurazione, Rimozione app e funzioni, Script di ottimizzazione, Singole impostazioni: tutto ciò che modifica il Windows in uso), **ISO Lite di Windows** (UUP dump, aggiornamenti, rimozione app e creazione dell'ISO), **Programmi**, **Estensioni Chrome**, **Pulizia e avvio**, **Backup di sistema**.
 
 ## 2.6
 

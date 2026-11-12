@@ -142,6 +142,24 @@ pub const SCRIPTS: &[Script] = &[
     },
     Script {
         group: "Extra",
+        label: "«Apri PowerShell/Prompt qui» nel tasto destro",
+        desc: "Aggiunge al tasto destro su cartelle e sfondo le voci per aprire PowerShell e il Prompt dei comandi nella cartella. In Windows 11 stanno sotto «Mostra altre opzioni».",
+        file: "ShellQui_Aggiungi.reg",
+        kind: Kind::Reg,
+        impact: Impact::Normal,
+        bytes: embed!("ShellQui_Aggiungi.reg"),
+    },
+    Script {
+        group: "Extra",
+        label: "Togli «Apri PowerShell/Prompt qui»",
+        desc: "Rimuove dal tasto destro le voci aggiunte dallo script precedente.",
+        file: "ShellQui_Rimuovi.reg",
+        kind: Kind::Reg,
+        impact: Impact::Normal,
+        bytes: embed!("ShellQui_Rimuovi.reg"),
+    },
+    Script {
+        group: "Extra",
         label: "Gallery in Esplora file",
         desc: "Applica il file .reg che abilita la Galleria in Esplora file.",
         file: "Gallery_Enabler_v2.reg",
@@ -374,5 +392,32 @@ mod tests {
             assert_eq!(bare, 0, "{} ha fine riga LF", s.file);
         }
         let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn shell_here_scripts_use_safe_quoting_and_can_be_undone() {
+        let add = SCRIPTS
+            .iter()
+            .find(|s| s.file == "ShellQui_Aggiungi.reg")
+            .unwrap();
+        let rem = SCRIPTS
+            .iter()
+            .find(|s| s.file == "ShellQui_Rimuovi.reg")
+            .unwrap();
+        assert!(in_set(add, Set::Config) && in_set(rem, Set::Config));
+        let a = String::from_utf8(add.bytes.unwrap().to_vec()).unwrap();
+        let r = String::from_utf8(rem.bytes.unwrap().to_vec()).unwrap();
+        assert!(a.starts_with("Windows Registry Editor Version 5.00"));
+        // PowerShell: apici singoli, perche' le virgolette doppie verrebbero tolte e le cartelle con spazi si spezzerebbero.
+        assert!(a.contains("-LiteralPath '%V'\""));
+        assert!(!a.contains("-LiteralPath \\\"%V"));
+        // Ogni chiave aggiunta ha la sua cancellazione.
+        for key in ["OpenPowerShellHere", "OpenCmdHere"] {
+            for base in ["Directory\\Background\\shell", "Directory\\shell"] {
+                let k = format!("{base}\\{key}");
+                assert!(a.contains(&format!("[HKEY_CLASSES_ROOT\\{k}]")), "{k}");
+                assert!(r.contains(&format!("[-HKEY_CLASSES_ROOT\\{k}]")), "{k}");
+            }
+        }
     }
 }

@@ -25,17 +25,17 @@ pub enum Section {
 /// Sotto-schede della scheda «Debloat»: tutto ciò che modifica il Windows in uso.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum DebloatTab {
-    Single,
     Scripts,
     Installed,
     Optimize,
+    Single,
 }
 
 const DEBLOAT_TABS: [(DebloatTab, &str); 4] = [
-    (DebloatTab::Single, "Singole impostazioni"),
     (DebloatTab::Scripts, "Script di configurazione"),
     (DebloatTab::Installed, "Rimozione app e funzioni"),
     (DebloatTab::Optimize, "Script di ottimizzazione"),
+    (DebloatTab::Single, "Singole impostazioni"),
 ];
 
 /// Scheda: titolo e colore pastello (sempre colorata, non solo quando è scelta).
@@ -63,7 +63,7 @@ impl App {
         theme::apply(&cc.egui_ctx);
         Self {
             section: Section::Debloat,
-            debloat_tab: DebloatTab::Single,
+            debloat_tab: DebloatTab::Scripts,
             tweak: TweakPanel::new(open),
             install: InstallPanel::new(),
             liber: LiberPanel::new(),

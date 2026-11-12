@@ -1,0 +1,11 @@
+Windows Registry Editor Version 5.00
+
+; Toglie le voci "Apri PowerShell qui" e "Apri Prompt dei comandi qui" dal tasto destro.
+
+[-HKEY_CLASSES_ROOT\Directory\Background\shell\OpenPowerShellHere]
+
+[-HKEY_CLASSES_ROOT\Directory\Background\shell\OpenCmdHere]
+
+[-HKEY_CLASSES_ROOT\Directory\shell\OpenPowerShellHere]
+
+[-HKEY_CLASSES_ROOT\Directory\shell\OpenCmdHere]
