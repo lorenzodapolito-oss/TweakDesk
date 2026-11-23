@@ -6,6 +6,8 @@ use std::path::{Path, PathBuf};
 pub enum Kind {
     Bat,
     Reg,
+    /// Programma di terzi da copiare a mano nella cartella «Script»: oggi non ce ne sono.
+    #[allow(dead_code)]
     Exe,
 }
 
@@ -169,12 +171,21 @@ pub const SCRIPTS: &[Script] = &[
     },
     Script {
         group: "Extra",
-        label: "Menu contestuale classico (W11ClassicMenu.exe)",
-        desc: "Avvia lo strumento di terzi per il menu contestuale classico. Il file non è incluso: mettilo nella cartella «Script» accanto a TweakDesk.",
-        file: "W11ClassicMenu.exe",
-        kind: Kind::Exe,
+        label: "Menu contestuale classico",
+        desc: "Il tasto destro mostra subito il menu completo, senza «Mostra altre opzioni». Cambia una chiave di registro dell'utente e riavvia Esplora risorse. Non serve nessun programma esterno.",
+        file: "MenuClassico.bat",
+        kind: Kind::Bat,
         impact: Impact::Normal,
-        bytes: None,
+        bytes: embed!("MenuClassico.bat"),
+    },
+    Script {
+        group: "Extra",
+        label: "Menu contestuale di Windows 11",
+        desc: "Toglie il menu classico e rimette quello di Windows 11. Riavvia Esplora risorse.",
+        file: "MenuWindows11.bat",
+        kind: Kind::Bat,
+        impact: Impact::Normal,
+        bytes: embed!("MenuWindows11.bat"),
     },
 ];
 
@@ -312,7 +323,8 @@ mod tests {
                 assert!(b.len() > 20, "{} vuoto", s.file);
             }
         }
-        assert_eq!(SCRIPTS.iter().filter(|s| s.bytes.is_none()).count(), 1);
+        // Ora gli script sono tutti incorporati: nessun programma di terzi da copiare a mano.
+        assert!(SCRIPTS.iter().all(|s| s.bytes.is_some()));
     }
 
     #[test]
@@ -335,10 +347,19 @@ mod tests {
         let s = SCRIPTS.iter().find(|s| s.file == "Italiano.bat").unwrap();
         let p = prepare(s, &dir).unwrap();
         assert_eq!(std::fs::read(&p).unwrap(), crlf(s.bytes.unwrap()));
-        let ext = SCRIPTS.iter().find(|s| s.bytes.is_none()).unwrap();
-        assert!(prepare(ext, &dir).unwrap_err().contains("non trovato"));
+        // Il meccanismo per i programmi di terzi resta: non incorporati, si cercano nella cartella.
+        let ext = Script {
+            group: "Extra",
+            label: "Programma di terzi",
+            desc: "prova",
+            file: "terzi.exe",
+            kind: Kind::Exe,
+            impact: Impact::Normal,
+            bytes: None,
+        };
+        assert!(prepare(&ext, &dir).unwrap_err().contains("non trovato"));
         std::fs::write(dir.join(ext.file), b"MZ").unwrap();
-        assert!(prepare(ext, &dir).is_ok());
+        assert!(prepare(&ext, &dir).is_ok());
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -504,6 +525,34 @@ mod tests {
         prepare(s, &d).unwrap();
         assert!(d.join("Lingue").is_dir());
         let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn classic_menu_scripts_need_no_external_program() {
+        assert!(!SCRIPTS.iter().any(|s| s.file.contains("W11ClassicMenu")));
+        // La stessa chiave della voce «Menu contestuale classico» del debloat.
+        let clsid = "{86ca1aa0-34aa-4e8b-a509-50c905bae2a2}";
+        assert!(crate::debloat::catalog::ITEMS
+            .iter()
+            .flat_map(|i| i.acts.iter())
+            .any(|a| matches!(a, crate::debloat::catalog::Act::Reg { key, .. } if key.contains(clsid))));
+        let on = script_text("MenuClassico.bat");
+        let off = script_text("MenuWindows11.bat");
+        for t in [&on, &off] {
+            assert!(t.is_ascii());
+            assert!(t.contains(clsid));
+            assert!(t.contains("HKCU\\Software\\Classes\\CLSID"));
+            // Il menu cambia solo dopo il riavvio di Esplora risorse.
+            assert!(t.contains("taskkill /f /im explorer.exe"));
+            assert!(t.contains("start \"\" explorer.exe"));
+            assert!(t.contains("errorlevel"));
+        }
+        assert!(on.contains("reg add") && on.contains("/ve /t REG_SZ /d \"\" /f"));
+        assert!(off.contains("reg delete") && off.contains("reg query"));
+        for f in ["MenuClassico.bat", "MenuWindows11.bat"] {
+            let s = SCRIPTS.iter().find(|s| s.file == f).unwrap();
+            assert_eq!((s.kind, s.group), (Kind::Bat, "Extra"));
+        }
     }
 
     #[test]

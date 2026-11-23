@@ -27,7 +27,7 @@ e le **applica su qualsiasi altro PC**, con copia di sicurezza e possibilità di
 
 - **1 Scansiona il PC / 2 Scarica / 3 Installa**: elenca i programmi installati che winget sa scaricare, ne salva gli installer nella cartella predefinita (saltando quelli già aggiornati) e li installa in silenzio.
 - **Estensioni Chrome**: estrae le estensioni di tutti i profili, salva un elenco (`.json` + pagina `.html`) e le reinstalla aprendo il Web Store a gruppi di 8 oppure con i criteri di Chrome (amministratore; `Rimuovi-installazione-forzata.reg` li annulla).
-- **Configurazione Windows**: script incorporati (MegaConfig, Italiano + orario, Ottimizza, Attivazione, Blocca Windows Update, sposta cartelle su D:, esporta/importa menu Start e taskbar, Gallery). Quelli ad alto impatto chiedono conferma. `W11ClassicMenu.exe` va copiato nella cartella `Script`.
+- **Configurazione Windows**: script incorporati (MegaConfig, Italiano + orario, Ottimizza, Attivazione, Blocca Windows Update, sposta cartelle su D:, esporta/importa menu Start e taskbar, Gallery, menu contestuale classico o di Windows 11). Quelli ad alto impatto chiedono conferma.
 
 ## Pulizia e avvio (alla CCleaner)
 
