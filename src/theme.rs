@@ -29,6 +29,10 @@ pub const TAB_YELLOW: Color32 = Color32::from_rgb(0xF3, 0xE0, 0x9A);
 pub const TAB_PEACH: Color32 = Color32::from_rgb(0xF6, 0xBF, 0x9C);
 pub const TAB_LILAC: Color32 = Color32::from_rgb(0xCF, 0xBF, 0xF0);
 pub const TAB_PINK: Color32 = Color32::from_rgb(0xF2, 0xBB, 0xD0);
+/// Etichette dei livelli del debloat (Sicuro, Standard, Estremo): pastello, con testo blu notte.
+pub const LEVEL_SAFE: Color32 = TAB_MINT;
+pub const LEVEL_STANDARD: Color32 = TAB_BLUE;
+pub const LEVEL_EXTREME: Color32 = TAB_PINK;
 /// Testo sui pulsanti pastello: blu notte.
 pub const ON_COLOR: Color32 = Color32::from_rgb(0x1B, 0x28, 0x55);
 pub const LOG_BG: Color32 = Color32::from_rgb(0x34, 0x41, 0x72);
@@ -170,5 +174,17 @@ mod tests {
         for (n, c) in named {
             assert!(!neutral(c), "{n}: {c:?} è bianco o grigio");
         }
+    }
+
+    #[test]
+    fn level_labels_are_pastel_distinct_and_readable() {
+        let levels = [LEVEL_SAFE, LEVEL_STANDARD, LEVEL_EXTREME];
+        for c in levels {
+            let [r, g, b, _] = c.to_srgba_unmultiplied();
+            assert!(!neutral(c), "{c:?} è bianco o grigio");
+            assert!(r.min(g).min(b) >= 0x90, "{c:?} non è pastello");
+            assert!(r.max(g).max(b) <= 0xF8, "{c:?} è quasi bianco");
+        }
+        assert!(levels[0] != levels[1] && levels[1] != levels[2] && levels[0] != levels[2]);
     }
 }

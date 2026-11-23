@@ -24,6 +24,8 @@ enum Event {
     Editions(Result<Vec<Edition>, String>),
     Oscdimg(PathBuf),
     IsoIn(PathBuf),
+    /// Cosa resta da fare dopo «Applica» (riavviare Esplora risorse o il PC).
+    Followup(apply::Followup),
     Finished,
 }
 
@@ -66,6 +68,7 @@ pub struct DebloatPanel {
     rx: Receiver<Event>,
     is_admin: bool,
     confirm: bool,
+    followup: Option<apply::Followup>,
     // ISO
     iso_in: String,
     iso_out: String,
@@ -105,6 +108,7 @@ impl DebloatPanel {
             rx,
             is_admin: RealSys.is_admin(),
             confirm: false,
+            followup: None,
             iso_in: String::new(),
             iso_out: base
                 .join("Windows11-TweakDesk.iso")
@@ -162,6 +166,7 @@ impl DebloatPanel {
                 },
                 Event::IsoIn(p) => self.iso_in = p.to_string_lossy().to_string(),
                 Event::Oscdimg(p) => self.oscdimg = p.to_string_lossy().to_string(),
+                Event::Followup(f) => self.followup = Some(f),
                 Event::Progress(n, t) => self.progress = Some((n, t)),
                 Event::Finished => {
                     self.busy = false;
@@ -191,13 +196,19 @@ impl DebloatPanel {
 
     fn apply_installed(&mut self, ctx: &egui::Context) {
         let items = Self::chosen(&self.inst, false);
+        self.followup = None;
         self.say(theme::LOG_INFO, format!("Applico {} voci…", items.len()));
         self.spawn(ctx, move |tx| {
             let root = std::env::var("SystemRoot").unwrap_or_else(|_| "C:\\Windows".into());
             let target = Target::online(PathBuf::from(root));
             let t2 = tx.clone();
             let t3 = tx.clone();
-            let (rep, undo) = apply::apply_with_progress(
+            let stamp = chrono::Local::now().format("%Y%m%d-%H%M%S");
+            let file = app_dir().join("BackupDebloat").join(format!("annulla-{stamp}.json"));
+            // Il file «Annulla» si riscrive a ogni modifica, prima di farla: anche se il
+            // programma si chiude a metà, si può tornare indietro.
+            let mut save_err: Option<String> = None;
+            let (rep, undo) = apply::apply_full(
                 &items,
                 &target,
                 &RealSys,
@@ -207,18 +218,37 @@ impl DebloatPanel {
                 &mut |n, t| {
                     let _ = t3.send(Event::Progress(n, t));
                 },
+                &mut |steps| {
+                    if let Err(e) = apply::save_undo(steps, &file) {
+                        save_err = Some(e);
+                    }
+                },
             );
-            let stamp = chrono::Local::now().format("%Y%m%d-%H%M%S");
-            let file = app_dir().join("BackupDebloat").join(format!("annulla-{stamp}.json"));
-            let msg = match apply::save_undo(&undo, &file) {
-                Ok(()) if !undo.is_empty() => format!("Per tornare indietro (registro e servizi): pulsante «Annulla». {} modifiche salvate.", undo.len()),
-                Ok(()) => String::new(),
-                Err(e) => format!("Annulla non salvato: {e}"),
+            let msg = match (&save_err, undo.is_empty()) {
+                (Some(e), _) => format!("Annulla non salvato: {e}"),
+                (None, false) => format!("Per tornare indietro: pulsante «Annulla». {} modifiche salvate.", undo.len()),
+                (None, true) => String::new(),
             };
             let _ = tx.send(Event::Log(
                 Kind::Ok,
                 format!("Finito: {} fatte, {} senza effetto, {} fallite. {msg}", rep.done, rep.skipped, rep.failed),
             ));
+            let f = apply::followup(&items);
+            if let Some(m) = f.message() {
+                let _ = tx.send(Event::Log(Kind::Info, m.to_string()));
+                let _ = tx.send(Event::Followup(f));
+            }
+        });
+    }
+
+    fn restart_explorer(&mut self, ctx: &egui::Context) {
+        self.say(theme::LOG_INFO, "Riavvio Esplora risorse…");
+        self.spawn(ctx, move |tx| {
+            let m = match apply::restart_explorer(&RealSys) {
+                Ok(()) => (Kind::Ok, "Esplora risorse riavviato.".to_string()),
+                Err(e) => (Kind::Err, format!("Esplora risorse non riavviato: {e}")),
+            };
+            let _ = tx.send(Event::Log(m.0, m.1));
         });
     }
 
@@ -413,16 +443,17 @@ impl DebloatPanel {
         });
         ui.add_space(4.0);
         for level in [Level::Sicuro, Level::Standard, Level::Estremo] {
-            let color = match level {
-                Level::Sicuro => Color32::from_rgb(0x1E, 0x6B, 0x3A),
-                Level::Standard => Color32::from_rgb(0x1F, 0x4E, 0x8C),
-                Level::Estremo => Color32::from_rgb(0x9B, 0x2C, 0x2C),
+            let bg = match level {
+                Level::Sicuro => theme::LEVEL_SAFE,
+                Level::Standard => theme::LEVEL_STANDARD,
+                Level::Estremo => theme::LEVEL_EXTREME,
             };
             egui::CollapsingHeader::new(
-                RichText::new(level.title())
+                RichText::new(format!(" {} ", level.title()))
                     .strong()
                     .size(16.0)
-                    .color(color),
+                    .color(theme::ON_COLOR)
+                    .background_color(bg),
             )
             .id_salt(("lvl", iso, level.title()))
             .default_open(level != Level::Estremo)
@@ -497,8 +528,22 @@ impl DebloatPanel {
                 ui.label(RichText::new("Servono i permessi di amministratore.").color(theme::WARN));
             }
         });
+        if let Some(f) = self.followup {
+            if let Some(msg) = f.message() {
+                ui.horizontal_wrapped(|ui| {
+                    ui.label(RichText::new(msg).color(theme::MUTED));
+                    if f.explorer
+                        && ui
+                            .add_enabled(!self.busy, egui::Button::new("Riavvia Esplora risorse"))
+                            .clicked()
+                    {
+                        self.restart_explorer(ctx);
+                    }
+                });
+            }
+        }
         ui.label(
-            RichText::new("Agisce sul Windows in uso. «Annulla» ripristina registro e servizi; app, funzionalità e file tolti non si recuperano. Nessun punto di ripristino viene creato.")
+            RichText::new("Agisce sul Windows in uso. «Annulla» ripristina registro, servizi, attività pianificate e piano energetico; app, funzionalità e file tolti non si recuperano. Nessun punto di ripristino viene creato.")
                 .color(theme::MUTED),
         );
         ui.add_space(4.0);

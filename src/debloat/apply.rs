@@ -1,7 +1,7 @@
 //! Applica le voci scelte: app, registro, servizi, attività, funzionalità, file. Funziona sul sistema in uso e sulle immagini.
 
 use crate::clean::sys::Sys;
-use crate::debloat::catalog::{Act, Item, RegKind};
+use crate::debloat::catalog::{Act, Group, Item, RegKind};
 use crate::debloat::target::{ps_quote, safe_join, Target};
 use serde::{Deserialize, Serialize};
 use std::path::Path;
@@ -37,6 +37,105 @@ pub enum Undo {
     DeleteKey {
         key: String,
     },
+    /// Riattiva un'attività pianificata che prima era attiva.
+    EnableTask {
+        path: String,
+    },
+    /// Rimette il piano energetico che prima era attivo.
+    PowerScheme {
+        guid: String,
+    },
+}
+
+/// Elenco delle modifiche annullabili. Ogni voce viene salvata subito, prima di
+/// cambiare davvero il sistema: se il programma si chiude a metà, l'annullamento c'è.
+struct Journal<'a> {
+    steps: Vec<Undo>,
+    save: &'a mut dyn FnMut(&[Undo]),
+}
+
+impl Journal<'_> {
+    fn record(&mut self, u: Undo) {
+        self.steps.push(u);
+        (self.save)(&self.steps);
+    }
+}
+
+/// Gli script scrivono `TD:<n>` (quante cose hanno trovato e cambiato) ed
+/// `ERR:<messaggio>` se qualcosa non è riuscito.
+fn found(out: &str) -> Option<u32> {
+    out.lines()
+        .find_map(|l| l.trim().strip_prefix("TD:")?.trim().parse().ok())
+}
+
+/// `false` solo se lo script dice di non aver trovato nulla da cambiare.
+/// Senza risposta chiara conta come fatto.
+fn did_something(out: &str) -> bool {
+    found(out).is_none_or(|n| n > 0)
+}
+
+fn script_error(out: &str) -> Option<String> {
+    out.lines()
+        .find_map(|l| l.trim().strip_prefix("ERR:").map(|e| e.trim().to_string()))
+}
+
+fn is_guid(s: &str) -> bool {
+    let parts: Vec<&str> = s.split('-').collect();
+    parts.len() == 5
+        && [8, 4, 4, 4, 12]
+            .iter()
+            .zip(&parts)
+            .all(|(n, p)| p.len() == *n && p.chars().all(|c| c.is_ascii_hexdigit()))
+}
+
+/// Estrae il GUID dall'output di `powercfg /getactivescheme` (il nome è tradotto, il GUID no).
+pub fn parse_scheme_guid(text: &str) -> Option<String> {
+    text.split_whitespace()
+        .find(|w| is_guid(w))
+        .map(str::to_string)
+}
+
+fn active_scheme(sys: &dyn Sys) -> Option<String> {
+    let out = sys.run("powercfg", &["/getactivescheme"]).ok()?;
+    parse_scheme_guid(&out)
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum TaskState {
+    Missing,
+    Disabled,
+    Enabled,
+    Unknown,
+}
+
+fn task_state(sys: &dyn Sys, path: &str) -> TaskState {
+    let (dir, name) = match path.rsplit_once('\\') {
+        Some((d, n)) => (format!("{d}\\"), n.to_string()),
+        None => ("\\".to_string(), path.to_string()),
+    };
+    let script = format!(
+        "$t = Get-ScheduledTask -TaskPath {} -TaskName {} -ErrorAction SilentlyContinue; if ($t) {{ Write-Output ('TD:' + $t.State) }} else {{ Write-Output 'TD:Missing' }}",
+        ps_quote(&dir),
+        ps_quote(&name)
+    );
+    match run_ps(sys, &script) {
+        Ok(out) if out.contains("TD:Missing") => TaskState::Missing,
+        Ok(out) if out.contains("TD:Disabled") => TaskState::Disabled,
+        Ok(out) if out.contains("TD:") => TaskState::Enabled,
+        _ => TaskState::Unknown,
+    }
+}
+
+fn disable_task(sys: &dyn Sys, path: &str, undo: &mut Journal) -> Result<bool, String> {
+    match task_state(sys, path) {
+        TaskState::Missing | TaskState::Disabled => return Ok(false),
+        TaskState::Enabled => undo.record(Undo::EnableTask {
+            path: path.to_string(),
+        }),
+        TaskState::Unknown => {}
+    }
+    sys.run("schtasks", &["/change", "/tn", path, "/disable"])
+        .map(|_| true)
 }
 
 fn kind_name(k: RegKind) -> &'static str {
@@ -107,55 +206,59 @@ fn names_array(prefixes: &[&str]) -> String {
     format!("@({})", q.join(","))
 }
 
-fn remove_appx(sys: &dyn Sys, t: &Target, prefixes: &[&str]) -> Result<(), String> {
+fn remove_appx(sys: &dyn Sys, t: &Target, prefixes: &[&str]) -> Result<bool, String> {
     let arr = names_array(prefixes);
     let script = match &t.mount {
         Some(m) => {
             let m = ps_quote(&m.to_string_lossy());
             format!(
-                "foreach($p in {arr}) {{ Get-AppxProvisionedPackage -Path {m} | Where-Object {{ $_.DisplayName -like ($p + '*') }} | ForEach-Object {{ Remove-AppxProvisionedPackage -Path {m} -PackageName $_.PackageName | Out-Null }} }}"
+                "$n = 0; $err = ''; foreach($p in {arr}) {{ $v = @(Get-AppxProvisionedPackage -Path {m} | Where-Object {{ $_.DisplayName -like ($p + '*') }}); $n += $v.Count; foreach($x in $v) {{ try {{ Remove-AppxProvisionedPackage -Path {m} -PackageName $x.PackageName -ErrorAction Stop | Out-Null }} catch {{ $err = $_.Exception.Message }} }} }}; Write-Output ('TD:' + $n); if ($err) {{ Write-Output ('ERR:' + $err) }}"
             )
         }
         None => format!(
-            "foreach($p in {arr}) {{ Get-AppxPackage -AllUsers -Name ($p + '*') | Remove-AppxPackage -AllUsers -ErrorAction SilentlyContinue; Get-AppxProvisionedPackage -Online | Where-Object {{ $_.DisplayName -like ($p + '*') }} | ForEach-Object {{ Remove-AppxProvisionedPackage -Online -PackageName $_.PackageName | Out-Null }} }}"
+            "$n = 0; $err = ''; foreach($p in {arr}) {{ $a = @(Get-AppxPackage -AllUsers -Name ($p + '*')); $v = @(Get-AppxProvisionedPackage -Online | Where-Object {{ $_.DisplayName -like ($p + '*') }}); $n += $a.Count + $v.Count; foreach($x in $a) {{ try {{ Remove-AppxPackage -Package $x.PackageFullName -AllUsers -ErrorAction Stop }} catch {{ $err = $_.Exception.Message }} }}; foreach($x in $v) {{ try {{ Remove-AppxProvisionedPackage -Online -PackageName $x.PackageName -ErrorAction Stop | Out-Null }} catch {{ $err = $_.Exception.Message }} }} }}; Write-Output ('TD:' + $n); if ($err) {{ Write-Output ('ERR:' + $err) }}"
         ),
     };
-    run_ps(sys, &script).map(|_| ())
+    let out = run_ps(sys, &script)?;
+    match script_error(&out) {
+        Some(e) => Err(e),
+        None => Ok(did_something(&out)),
+    }
 }
 
-fn disable_feature(sys: &dyn Sys, t: &Target, name: &str) -> Result<(), String> {
+fn disable_feature(sys: &dyn Sys, t: &Target, name: &str) -> Result<bool, String> {
     let ta = target_arg(t);
     let remove = if t.is_offline() { " -Remove" } else { "" };
     let n = ps_quote(name);
     let script = format!(
-        "$f = Get-WindowsOptionalFeature {ta} -FeatureName {n} -ErrorAction SilentlyContinue; if ($f -and $f.State -ne 'Disabled') {{ Disable-WindowsOptionalFeature {ta} -FeatureName {n}{remove} -NoRestart | Out-Null }}"
+        "$f = Get-WindowsOptionalFeature {ta} -FeatureName {n} -ErrorAction SilentlyContinue; if ($f -and $f.State -notlike 'Disabled*') {{ Disable-WindowsOptionalFeature {ta} -FeatureName {n}{remove} -NoRestart -ErrorAction Stop | Out-Null; Write-Output 'TD:1' }} else {{ Write-Output 'TD:0' }}"
     );
-    run_ps(sys, &script).map(|_| ())
+    run_ps(sys, &script).map(|o| did_something(&o))
 }
 
-fn remove_capability(sys: &dyn Sys, t: &Target, prefix: &str) -> Result<(), String> {
+fn remove_capability(sys: &dyn Sys, t: &Target, prefix: &str) -> Result<bool, String> {
     let ta = target_arg(t);
     let p = ps_quote(prefix);
     let script = format!(
-        "Get-WindowsCapability {ta} | Where-Object {{ $_.Name -like ({p} + '*') -and $_.State -eq 'Installed' }} | ForEach-Object {{ Remove-WindowsCapability {ta} -Name $_.Name | Out-Null }}"
+        "$c = @(Get-WindowsCapability {ta} | Where-Object {{ $_.Name -like ({p} + '*') -and $_.State -eq 'Installed' }}); foreach($x in $c) {{ Remove-WindowsCapability {ta} -Name $x.Name -ErrorAction Stop | Out-Null }}; Write-Output ('TD:' + $c.Count)"
     );
-    run_ps(sys, &script).map(|_| ())
+    run_ps(sys, &script).map(|o| did_something(&o))
 }
 
-fn delete_path(sys: &dyn Sys, path: &Path) -> Result<(), String> {
+fn delete_path(sys: &dyn Sys, path: &Path) -> Result<bool, String> {
     let p = ps_quote(&path.to_string_lossy());
     let script = format!(
-        "$p = {p}; if (Test-Path -Path $p) {{ icacls $p /setowner *S-1-5-32-544 /t /c /q | Out-Null; icacls $p /grant *S-1-5-32-544:F /t /c /q | Out-Null; Remove-Item -Path $p -Recurse -Force -ErrorAction SilentlyContinue }}"
+        "$p = {p}; if (Test-Path -Path $p) {{ icacls $p /setowner *S-1-5-32-544 /t /c /q | Out-Null; icacls $p /grant *S-1-5-32-544:F /t /c /q | Out-Null; Remove-Item -Path $p -Recurse -Force -ErrorAction SilentlyContinue; Write-Output 'TD:1' }} else {{ Write-Output 'TD:0' }}"
     );
-    run_ps(sys, &script).map(|_| ())
+    run_ps(sys, &script).map(|o| did_something(&o))
 }
 
 /// Esegue una singola azione.
-fn run_act(act: &Act, t: &Target, sys: &dyn Sys, undo: &mut Vec<Undo>) -> Result<bool, String> {
+fn run_act(act: &Act, t: &Target, sys: &dyn Sys, undo: &mut Journal) -> Result<bool, String> {
     match act {
-        Act::Appx(p) => remove_appx(sys, t, &[p]).map(|()| true),
-        Act::Feature(f) => disable_feature(sys, t, f).map(|()| true),
-        Act::Capability(c) => remove_capability(sys, t, c).map(|()| true),
+        Act::Appx(p) => remove_appx(sys, t, &[p]),
+        Act::Feature(f) => disable_feature(sys, t, f),
+        Act::Capability(c) => remove_capability(sys, t, c),
         Act::Reg {
             key,
             name,
@@ -165,7 +268,7 @@ fn run_act(act: &Act, t: &Target, sys: &dyn Sys, undo: &mut Vec<Undo>) -> Result
             let k = t.map_key(key)?;
             if !t.is_offline() {
                 if let Some(u) = prior(sys, &k, name) {
-                    undo.push(u);
+                    undo.record(u);
                 }
             }
             sys.run("reg", &reg_args(&k, name, kind_name(*kind), data))
@@ -182,7 +285,7 @@ fn run_act(act: &Act, t: &Target, sys: &dyn Sys, undo: &mut Vec<Undo>) -> Result
             }
             if !t.is_offline() {
                 if let Some(u) = prior(sys, &k, name) {
-                    undo.push(u);
+                    undo.record(u);
                 }
             }
             sys.reg_delete_value(&k, name).map(|()| true)
@@ -196,7 +299,7 @@ fn run_act(act: &Act, t: &Target, sys: &dyn Sys, undo: &mut Vec<Undo>) -> Result
             }
             if !t.is_offline() {
                 if let Some(u) = prior(sys, &k, "Start") {
-                    undo.push(u);
+                    undo.record(u);
                 }
             }
             sys.run(
@@ -209,20 +312,24 @@ fn run_act(act: &Act, t: &Target, sys: &dyn Sys, undo: &mut Vec<Undo>) -> Result
             if t.is_offline() {
                 let p = safe_join(&t.windows, &format!("System32\\Tasks{path}"))
                     .ok_or("percorso attività non valido")?;
-                delete_path(sys, &p).map(|()| true)
+                delete_path(sys, &p)
             } else {
-                sys.run("schtasks", &["/change", "/tn", path, "/disable"])
-                    .map(|_| true)
+                disable_task(sys, path, undo)
             }
         }
         Act::Delete(rel) => {
             let p =
                 safe_join(&t.windows, rel).ok_or_else(|| format!("percorso non valido: {rel}"))?;
-            delete_path(sys, &p).map(|()| true)
+            delete_path(sys, &p)
         }
         Act::Cmd(prog, args) => {
             if t.is_offline() {
                 return Ok(false);
+            }
+            if *prog == "powercfg" && args.first() == Some(&"/setactive") {
+                if let Some(guid) = active_scheme(sys) {
+                    undo.record(Undo::PowerScheme { guid });
+                }
             }
             sys.run(prog, args).map(|_| true)
         }
@@ -243,7 +350,43 @@ fn run_act(act: &Act, t: &Target, sys: &dyn Sys, undo: &mut Vec<Undo>) -> Result
     }
 }
 
-/// Applica le voci. Restituisce il resoconto e le istruzioni per annullare (registro).
+/// Cosa resta da fare all'utente dopo aver applicato le voci.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Followup {
+    /// Alcune modifiche all'interfaccia si vedono solo riavviando Esplora risorse.
+    pub explorer: bool,
+    /// Servizi e funzionalità cambiano solo dopo il riavvio del PC.
+    pub reboot: bool,
+}
+
+pub fn followup(items: &[&Item]) -> Followup {
+    Followup {
+        explorer: items.iter().any(|i| i.group == Group::Interfaccia),
+        reboot: items.iter().any(|i| {
+            i.acts
+                .iter()
+                .any(|a| matches!(a, Act::Svc { .. } | Act::Feature(_) | Act::Capability(_)))
+        }),
+    }
+}
+
+impl Followup {
+    pub fn message(self) -> Option<&'static str> {
+        match (self.explorer, self.reboot) {
+            (false, false) => None,
+            (true, false) => Some("Per vedere le modifiche all'interfaccia riavvia Esplora risorse (pulsante «Riavvia Esplora risorse») oppure esci e rientra in Windows."),
+            (false, true) => Some("Servizi e funzionalità cambiano solo dopo il riavvio del PC."),
+            (true, true) => Some("Riavvia Esplora risorse (pulsante «Riavvia Esplora risorse») per l'interfaccia e poi il PC: servizi e funzionalità cambiano solo dopo il riavvio."),
+        }
+    }
+}
+
+/// Chiude Esplora risorse: Windows lo riapre da solo.
+pub fn restart_explorer(sys: &dyn Sys) -> Result<(), String> {
+    run_ps(sys, "Stop-Process -Name explorer -Force").map(|_| ())
+}
+
+/// Applica le voci. Restituisce il resoconto e le istruzioni per annullare.
 pub fn apply(
     items: &[&Item],
     t: &Target,
@@ -261,12 +404,28 @@ pub fn apply_with_progress(
     log: &mut dyn FnMut(Kind, &str),
     progress: &mut dyn FnMut(usize, usize),
 ) -> (Report, Vec<Undo>) {
+    apply_full(items, t, sys, log, progress, &mut |_| {})
+}
+
+/// Come `apply_with_progress`, e chiama `save(modifiche_annullabili)` ogni volta che ne
+/// aggiunge una, PRIMA di cambiare il sistema: chi chiama può scrivere subito il file «Annulla».
+pub fn apply_full(
+    items: &[&Item],
+    t: &Target,
+    sys: &dyn Sys,
+    log: &mut dyn FnMut(Kind, &str),
+    progress: &mut dyn FnMut(usize, usize),
+    save: &mut dyn FnMut(&[Undo]),
+) -> (Report, Vec<Undo>) {
     let mut rep = Report::default();
-    let mut undo = Vec::new();
+    let mut undo = Journal {
+        steps: Vec::new(),
+        save,
+    };
     if let Err(e) = t.load_hives(sys) {
         log(Kind::Err, &e);
         rep.failed = items.len();
-        return (rep, undo);
+        return (rep, Vec::new());
     }
     let total = items.len();
     for (n, item) in items.iter().enumerate() {
@@ -301,10 +460,10 @@ pub fn apply_with_progress(
     }
     progress(total, total);
     t.unload_hives(sys);
-    (rep, undo)
+    (rep, undo.steps)
 }
 
-/// Riporta il registro com'era prima.
+/// Riporta indietro le modifiche: registro, servizi, attività pianificate e piano energetico.
 pub fn undo(steps: &[Undo], sys: &dyn Sys) -> Report {
     let mut rep = Report::default();
     for s in steps.iter().rev() {
@@ -317,6 +476,10 @@ pub fn undo(steps: &[Undo], sys: &dyn Sys) -> Report {
             } => sys.run("reg", &reg_args(key, name, kind, data)).map(|_| ()),
             Undo::DeleteValue { key, name } => sys.reg_delete_value(key, name),
             Undo::DeleteKey { key } => sys.run("reg", &["delete", key, "/f"]).map(|_| ()),
+            Undo::EnableTask { path } => sys
+                .run("schtasks", &["/change", "/tn", path, "/enable"])
+                .map(|_| ()),
+            Undo::PowerScheme { guid } => sys.run("powercfg", &["/setactive", guid]).map(|_| ()),
         };
         if r.is_ok() {
             rep.done += 1;
@@ -632,6 +795,233 @@ mod tests {
             &mut |n, t| seen.push((n, t)),
         );
         assert_eq!(seen, vec![(0, 2), (1, 2), (2, 2)]);
+    }
+
+    fn reply(sys: &FakeSys, contains: &str, out: &str) {
+        sys.responses
+            .borrow_mut()
+            .push((contains.to_string(), out.to_string()));
+    }
+
+    #[test]
+    fn undo_is_saved_before_each_change() {
+        use std::cell::{Cell, RefCell};
+        use std::rc::Rc;
+        let sys = FakeSys::default();
+        let saved = Rc::new(Cell::new(0usize));
+        let seen = Rc::new(RefCell::new(Vec::new()));
+        {
+            let (s, n) = (saved.clone(), seen.clone());
+            sys.hooks.borrow_mut().push((
+                "reg add".into(),
+                Box::new(move |_| n.borrow_mut().push(s.get())),
+            ));
+        }
+        let s2 = saved.clone();
+        let (_, undo) = apply_full(
+            &[item("ad_id"), item("ext")],
+            &online(),
+            &sys,
+            &mut noop(),
+            &mut |_, _| {},
+            &mut |steps| s2.set(steps.len()),
+        );
+        // Al momento di ogni «reg add» l'annullamento era già stato salvato.
+        assert_eq!(*seen.borrow(), vec![1, 2]);
+        assert_eq!(saved.get(), undo.len());
+    }
+
+    #[test]
+    fn enabled_tasks_are_disabled_and_can_be_enabled_again() {
+        let sys = FakeSys::default();
+        reply(&sys, "Get-ScheduledTask", "TD:Ready");
+        let (rep, undo) = apply(&[item("tasks_telemetry")], &online(), &sys, &mut noop());
+        assert_eq!(rep.done, 1);
+        assert_eq!(undo.len(), 7);
+        assert!(undo.iter().all(|u| matches!(u, Undo::EnableTask { .. })));
+        let sys2 = FakeSys::default();
+        assert_eq!(super::undo(&undo, &sys2).done, 7);
+        let c = sys2.commands.borrow().clone();
+        assert!(c.iter().all(|x| x.starts_with("schtasks /change /tn")));
+        assert!(c.iter().all(|x| x.ends_with("/enable")));
+    }
+
+    #[test]
+    fn missing_or_already_disabled_tasks_are_skipped() {
+        for state in ["TD:Missing", "TD:Disabled"] {
+            let sys = FakeSys::default();
+            reply(&sys, "Get-ScheduledTask", state);
+            let (rep, undo) = apply(&[item("tasks_telemetry")], &online(), &sys, &mut noop());
+            assert_eq!((rep.done, rep.skipped), (0, 1), "{state}");
+            assert!(undo.is_empty());
+            assert!(sys
+                .commands
+                .borrow()
+                .iter()
+                .all(|c| !c.starts_with("schtasks")));
+        }
+    }
+
+    #[test]
+    fn task_path_is_split_into_folder_and_name() {
+        let sys = FakeSys::default();
+        reply(&sys, "Get-ScheduledTask", "TD:Missing");
+        apply(&[item("tasks_telemetry")], &online(), &sys, &mut noop());
+        let c = sys.commands.borrow().clone();
+        assert!(c[0].contains(
+            "-TaskPath '\\Microsoft\\Windows\\Application Experience\\' -TaskName 'Microsoft Compatibility Appraiser'"
+        ), "{}", c[0]);
+    }
+
+    #[test]
+    fn power_plan_is_restored_by_undo() {
+        let sys = FakeSys::default();
+        reply(
+            &sys,
+            "getactivescheme",
+            "Power Scheme GUID: 381b4222-f694-41f0-9685-ff5bb260df2e  (Bilanciato)",
+        );
+        let (rep, undo) = apply(&[item("power")], &online(), &sys, &mut noop());
+        assert_eq!(rep.done, 1);
+        assert_eq!(
+            undo,
+            vec![Undo::PowerScheme {
+                guid: "381b4222-f694-41f0-9685-ff5bb260df2e".into()
+            }]
+        );
+        let sys2 = FakeSys::default();
+        super::undo(&undo, &sys2);
+        assert_eq!(
+            sys2.commands.borrow()[0],
+            "powercfg /setactive 381b4222-f694-41f0-9685-ff5bb260df2e"
+        );
+    }
+
+    #[test]
+    fn scheme_guid_parsing() {
+        assert_eq!(
+            parse_scheme_guid("GUID combinazione per il risparmio energia: 8c5e7fda-e8bf-4a96-9a85-a6e23a8c635c  (Prestazioni elevate)"),
+            Some("8c5e7fda-e8bf-4a96-9a85-a6e23a8c635c".into())
+        );
+        assert_eq!(parse_scheme_guid("nessun guid qui"), None);
+        assert_eq!(parse_scheme_guid("1234-5678"), None);
+    }
+
+    #[test]
+    fn nothing_to_remove_is_reported_as_nothing_to_do() {
+        for (id, probe) in [
+            ("news", "Get-AppxPackage"),
+            ("ps2", "Get-WindowsOptionalFeature"),
+            ("quickassist", "Get-WindowsCapability"),
+            ("clean_backup", "Test-Path"),
+        ] {
+            let sys = FakeSys::default();
+            reply(&sys, probe, "TD:0");
+            let (rep, _) = apply(&[item(id)], &online(), &sys, &mut noop());
+            assert_eq!((rep.done, rep.skipped, rep.failed), (0, 1, 0), "{id}");
+        }
+    }
+
+    #[test]
+    fn something_removed_is_reported_as_done() {
+        let sys = FakeSys::default();
+        reply(&sys, "Get-AppxPackage", "TD:2");
+        let (rep, _) = apply(&[item("news")], &online(), &sys, &mut noop());
+        assert_eq!(rep.done, 1);
+    }
+
+    #[test]
+    fn appx_errors_are_no_longer_hidden() {
+        let sys = FakeSys::default();
+        reply(&sys, "Get-AppxPackage", "TD:1\nERR:accesso negato");
+        let mut lines = Vec::new();
+        let (rep, _) = apply(&[item("news")], &online(), &sys, &mut |k, m| {
+            lines.push((k, m.to_string()))
+        });
+        assert_eq!((rep.done, rep.failed), (0, 1));
+        assert!(lines
+            .iter()
+            .any(|(k, m)| *k == Kind::Err && m.contains("accesso negato")));
+        let sys = FakeSys::default();
+        let c = {
+            apply(&[item("news")], &online(), &sys, &mut noop());
+            sys.commands.borrow().clone()
+        };
+        assert!(!c[0].contains("SilentlyContinue"), "{}", c[0]);
+    }
+
+    #[test]
+    fn script_output_parsing() {
+        assert_eq!(found("TD:3"), Some(3));
+        assert_eq!(found("rumore\nTD:0\n"), Some(0));
+        assert_eq!(found(""), None);
+        assert!(did_something(""));
+        assert!(did_something("TD:1"));
+        assert!(!did_something("TD:0"));
+        assert_eq!(script_error("TD:1\nERR: boom "), Some("boom".into()));
+        assert_eq!(script_error("TD:1"), None);
+    }
+
+    #[test]
+    fn new_undo_steps_roundtrip_and_old_files_still_load() {
+        let d = std::env::temp_dir().join(format!("tdun2_{}", std::process::id()));
+        let steps = vec![
+            Undo::EnableTask {
+                path: "\\A\\B".into(),
+            },
+            Undo::PowerScheme { guid: "x".into() },
+        ];
+        let f = d.join("b.json");
+        save_undo(&steps, &f).unwrap();
+        assert_eq!(load_undo(&f).unwrap(), steps);
+        let old =
+            r#"[{"DeleteValue":{"key":"HKCU\\A","name":"x"}},{"DeleteKey":{"key":"HKCU\\B"}}]"#;
+        std::fs::write(&f, old).unwrap();
+        assert_eq!(load_undo(&f).unwrap().len(), 2);
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn followup_tells_what_is_needed() {
+        assert_eq!(
+            followup(&[item("ext")]),
+            Followup {
+                explorer: true,
+                reboot: false
+            }
+        );
+        assert_eq!(
+            followup(&[item("svc_misc")]),
+            Followup {
+                explorer: false,
+                reboot: true
+            }
+        );
+        assert_eq!(
+            followup(&[item("ext"), item("ie")]),
+            Followup {
+                explorer: true,
+                reboot: true
+            }
+        );
+        let none = followup(&[item("news"), item("ad_id")]);
+        assert_eq!(none, Followup::default());
+        assert!(none.message().is_none());
+        assert!(followup(&[item("ext")])
+            .message()
+            .is_some_and(|m| m.contains("Esplora risorse")));
+        assert!(followup(&[item("svc_misc")])
+            .message()
+            .is_some_and(|m| m.contains("riavvio del PC")));
+    }
+
+    #[test]
+    fn explorer_restart_runs_and_reports_failure() {
+        let sys = FakeSys::default();
+        assert!(restart_explorer(&sys).is_ok());
+        assert!(sys.commands.borrow()[0].contains("Stop-Process -Name explorer"));
+        sys.failing.borrow_mut().push("powershell".into());
+        assert!(restart_explorer(&sys).is_err());
     }
 
     #[test]
