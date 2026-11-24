@@ -32,11 +32,35 @@ cd /d "%PROG%\TweakDesk"
 cargo build --release
 if errorlevel 1 goto fail
 
+rem Se nel frattempo hai riaperto TweakDesk (per provarlo), il suo file resta occupato
+rem e la copia darebbe "Accesso negato": lo richiudiamo anche qui, con un attimo di attesa.
+taskkill /f /im TweakDesk.exe >nul 2>&1
+if not errorlevel 1 timeout /t 2 /nobreak >nul
+
 set "OUT=%PROG%\TweakDesk\dist\TweakDesk-portable"
-if exist "%OUT%" rmdir /s /q "%OUT%"
-mkdir "%OUT%"
-copy /y "target\release\tweakdesk.exe" "%OUT%\TweakDesk.exe" >nul
-if errorlevel 1 goto fail
+set "TENTATIVI=0"
+:copia
+if exist "%OUT%" rmdir /s /q "%OUT%" 2>nul
+mkdir "%OUT%" 2>nul
+copy /y "target\release\tweakdesk.exe" "%OUT%\TweakDesk.exe" >nul 2>nul
+if not errorlevel 1 goto copiato
+set /a TENTATIVI+=1
+if %TENTATIVI% geq 5 goto copia_fallita
+echo File ancora occupato, riprovo tra un attimo...
+taskkill /f /im TweakDesk.exe >nul 2>&1
+timeout /t 2 /nobreak >nul
+goto copia
+
+:copia_fallita
+echo.
+echo Non riesco a sostituire "%OUT%\TweakDesk.exe": chiudi TweakDesk
+echo (anche dalla barra delle applicazioni) e il suo antivirus, se lo sta
+echo scansionando, poi premi un tasto per riprovare.
+pause >nul
+set "TENTATIVI=0"
+goto copia
+
+:copiato
 
 echo.
 echo FATTO: %OUT%\TweakDesk.exe
