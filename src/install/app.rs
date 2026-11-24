@@ -789,21 +789,7 @@ impl InstallPanel {
             });
         }
         egui::Panel::bottom("log").show(ui, |ui| {
-            egui::Frame::new()
-                .fill(theme::LOG_BG)
-                .inner_margin(6.0)
-                .show(ui, |ui| {
-                    egui::ScrollArea::vertical()
-                        .max_height(110.0)
-                        .auto_shrink([false, true])
-                        .stick_to_bottom(true)
-                        .show(ui, |ui| {
-                            ui.set_width(ui.available_width());
-                            for (c, m) in &self.log {
-                                ui.label(RichText::new(m).color(*c).monospace());
-                            }
-                        });
-                });
+            theme::log_view(ui, &self.log, 110.0);
         });
         egui::CentralPanel::default().show(ui, |ui| match self.tab {
             Tab::Pc => self.pc_table(ui),

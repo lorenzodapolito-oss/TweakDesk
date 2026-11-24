@@ -1,6 +1,6 @@
 //! Palette pastello (niente bianco) e stile dell'interfaccia.
 
-use eframe::egui::{self, Color32, CornerRadius, Stroke};
+use eframe::egui::{self, text::LayoutJob, Color32, CornerRadius, FontId, Stroke, TextFormat};
 
 /// Sfondo: celeste pastello.
 pub const BG: Color32 = Color32::from_rgb(0xC4, 0xE6, 0xF9);
@@ -111,6 +111,69 @@ fn harmonize(v: &mut egui::Visuals) {
     }
 }
 
+/// Le righe del registro, una per riga, come le vede chi le copia.
+pub fn log_text(log: &[(Color32, String)]) -> String {
+    log.iter()
+        .map(|(_, m)| m.as_str())
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// Il riquadro del registro in fondo a una scheda: scorrevole, con testo selezionabile
+/// (si può trascinare e copiare, anche con «Copia tutto») invece delle semplici etichette
+/// di prima, che non si potevano né selezionare né copiare del tutto.
+pub fn log_view(ui: &mut egui::Ui, log: &[(Color32, String)], max_height: f32) {
+    egui::Frame::new()
+        .fill(LOG_BG)
+        .inner_margin(6.0)
+        .show(ui, |ui| {
+            ui.horizontal(|ui| {
+                if ui
+                    .add_enabled(!log.is_empty(), egui::Button::new("Copia tutto"))
+                    .clicked()
+                {
+                    ui.ctx().copy_text(log_text(log));
+                }
+                ui.label(egui::RichText::new(format!("{} righe", log.len())).color(MUTED));
+            });
+            let joined = log_text(log);
+            let mut shown: &str = &joined;
+            egui::ScrollArea::vertical()
+                .max_height(max_height)
+                .auto_shrink([false, true])
+                .stick_to_bottom(true)
+                .show(ui, |ui| {
+                    ui.set_width(ui.available_width());
+                    let mut layouter =
+                        |ui: &egui::Ui, _buf: &dyn egui::TextBuffer, wrap_width: f32| {
+                            let mut job = LayoutJob::default();
+                            for (i, (c, m)) in log.iter().enumerate() {
+                                if i > 0 {
+                                    job.append("\n", 0.0, TextFormat::default());
+                                }
+                                job.append(
+                                    m,
+                                    0.0,
+                                    TextFormat {
+                                        font_id: FontId::monospace(12.0),
+                                        color: *c,
+                                        ..Default::default()
+                                    },
+                                );
+                            }
+                            job.wrap.max_width = wrap_width;
+                            ui.ctx().fonts_mut(|f| f.layout_job(job))
+                        };
+                    ui.add(
+                        egui::TextEdit::multiline(&mut shown)
+                            .desired_width(f32::INFINITY)
+                            .frame(egui::Frame::NONE)
+                            .layouter(&mut layouter),
+                    );
+                });
+        });
+}
+
 pub fn apply(ctx: &egui::Context) {
     let v = visuals();
     ctx.set_theme(egui::ThemePreference::Light);
@@ -125,6 +188,17 @@ pub fn apply(ctx: &egui::Context) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn log_text_joins_lines_in_order_without_colors() {
+        let log = vec![
+            (OK, "prima riga".to_string()),
+            (ERR, "seconda riga".to_string()),
+        ];
+        assert_eq!(log_text(&log), "prima riga\nseconda riga");
+        assert_eq!(log_text(&[]), "");
+        assert_eq!(log_text(&[(OK, "una sola".into())]), "una sola");
+    }
 
     fn neutral(c: Color32) -> bool {
         let [r, g, b, _] = c.to_srgba_unmultiplied().map(i32::from);
