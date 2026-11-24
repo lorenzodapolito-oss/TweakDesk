@@ -316,18 +316,33 @@ fn drive_label(name: &str) -> String {
 }
 
 /// Elenca le edizioni dentro una ISO (la monta e la smonta).
+/// Se il messaggio di errore di PowerShell/DISM parla di privilegi, lo rende chiaro.
+fn friendly_privilege_error(e: String) -> String {
+    let l = e.to_lowercase();
+    if l.contains("privilegi elevati") || l.contains("elevation") || l.contains("accesso negato") {
+        "Servono i permessi di amministratore: chiudi TweakDesk e riaprilo con «Esegui come amministratore».".into()
+    } else {
+        e
+    }
+}
+
 pub fn list_editions(sys: &dyn Sys, iso: &Path) -> Result<Vec<Edition>, String> {
     let q = ps_quote(&iso.to_string_lossy());
-    let letter = parse_drive_letter(&ps(
-        sys,
-        &format!("$i = Mount-DiskImage -ImagePath {q} -PassThru; ($i | Get-Volume).DriveLetter"),
-    )?)
+    let letter = parse_drive_letter(
+        &ps(
+            sys,
+            &format!(
+                "$i = Mount-DiskImage -ImagePath {q} -PassThru; ($i | Get-Volume).DriveLetter"
+            ),
+        )
+        .map_err(friendly_privilege_error)?,
+    )
     .ok_or("Non riesco a leggere la lettera dell'unità della ISO")?;
     let script = format!(
         "$w = '{letter}:\\sources\\install.wim'; if (-not (Test-Path -LiteralPath $w)) {{ $w = '{letter}:\\sources\\install.esd' }}; \
          Get-WindowsImage -ImagePath $w | ForEach-Object {{ \"$($_.ImageIndex)|$($_.ImageName)\" }}"
     );
-    let r = ps(sys, &script);
+    let r = ps(sys, &script).map_err(friendly_privilege_error);
     let _ = ps(
         sys,
         &format!("Dismount-DiskImage -ImagePath {q} | Out-Null"),
@@ -876,10 +891,15 @@ pub fn build(sys: &dyn Sys, plan: &Plan, log: &mut dyn FnMut(Kind, &str)) -> Res
 
     log(Kind::Info, "Monto la ISO e copio i file…");
     let q = ps_quote(&plan.iso_in.to_string_lossy());
-    let letter = parse_drive_letter(&ps(
-        sys,
-        &format!("$i = Mount-DiskImage -ImagePath {q} -PassThru; ($i | Get-Volume).DriveLetter"),
-    )?)
+    let letter = parse_drive_letter(
+        &ps(
+            sys,
+            &format!(
+                "$i = Mount-DiskImage -ImagePath {q} -PassThru; ($i | Get-Volume).DriveLetter"
+            ),
+        )
+        .map_err(friendly_privilege_error)?,
+    )
     .ok_or("Non riesco a leggere la lettera dell'unità della ISO")?;
     let copy = format!(
         "robocopy '{letter}:\\' {} /E /NFL /NDL /NJH /NJS /NC /NS /NP | Out-Null; if ($LASTEXITCODE -ge 8) {{ exit 1 }} else {{ exit 0 }}",
@@ -890,7 +910,9 @@ pub fn build(sys: &dyn Sys, plan: &Plan, log: &mut dyn FnMut(Kind, &str)) -> Res
         sys,
         &format!("Dismount-DiskImage -ImagePath {q} | Out-Null"),
     );
-    copied.map_err(|e| format!("Copia della ISO non riuscita: {e}"))?;
+    copied
+        .map_err(friendly_privilege_error)
+        .map_err(|e| format!("Copia della ISO non riuscita: {e}"))?;
     // I file copiati dalla ISO sono di sola lettura.
     let _ = sys.run(
         "attrib",
@@ -1375,6 +1397,24 @@ mod tests {
             ));
         }
         (sys, p)
+    }
+
+    #[test]
+    fn privilege_errors_are_translated_to_italian() {
+        let msg = "Get-WindowsImage : Per eseguire l'operazione richiesta è necessaria \
+l'esecuzione con privilegi elevati.";
+        assert_eq!(
+            friendly_privilege_error(msg.to_string()),
+            "Servono i permessi di amministratore: chiudi TweakDesk e riaprilo con «Esegui come amministratore»."
+        );
+        assert_eq!(
+            friendly_privilege_error("Access is denied. Accesso negato.".to_string()),
+            "Servono i permessi di amministratore: chiudi TweakDesk e riaprilo con «Esegui come amministratore»."
+        );
+        assert_eq!(
+            friendly_privilege_error("altro errore".to_string()),
+            "altro errore"
+        );
     }
 
     #[test]
