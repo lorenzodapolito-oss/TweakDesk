@@ -66,7 +66,7 @@ In «Estensioni Chrome» scegli **«Estrai dal profilo»** (nome, account Google
 ## Schede riorganizzate (2.4)
 
 - **Impostazioni di Windows**: due sotto-schede, «Script di configurazione» (lingua, cartelle utente, Start, taskbar, attivazione, extra, voci «Apri PowerShell/Prompt qui» nel tasto destro) e «Singole impostazioni» (il catalogo di opzioni, ultima).
-- **Debloat e ottimizzazione**: nuova sotto-scheda «Script di ottimizzazione» con «Ottimizza Windows» e «Blocca Windows Update».
+- **Debloat e ottimizzazione**: nuova sotto-scheda «Script di ottimizzazione» con «Ottimizza Windows», «Blocca Windows Update» e «Cerca e installa driver mancanti» (rileva i dispositivi senza driver, usa la cartella `Driver` accanto allo script e cerca su Windows Update; «Ottimizza Windows» non tocca più Windows Update).
 - La scheda «Configurazione di Windows» non esiste più; le schede in alto sono 6.
 
 ## Schede (2.5)

@@ -456,7 +456,6 @@ for %%t in (
     "Microsoft\Windows\PI\Sqm-Tasks"
     "Microsoft\Office\OfficeTelemetryAgentLogOn"
     "Microsoft\Office\OfficeTelemetryAgentFallBack"
-    "Microsoft\Windows\Windows Update\Automatic App Update"
 ) do (
     schtasks /change /TN "%%t" /disable >nul 2>&1
 )
@@ -465,24 +464,6 @@ call :log_error "Task Telemetria - Disabilitazione" 0
 
 echo [OK] Task telemetria disabilitati
 call :progress 90 "Task"
-
-:: =====================================
-:: WINDOWS UPDATE - Ottimizzazioni
-:: =====================================
-
-echo.
-echo Ottimizzazione Windows Update...
-
-reg add "HKLM\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate\AU" /f >nul 2>&1
-reg add "HKLM\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate\AU" /v AUOptions /t REG_DWORD /d 2 /f >nul 2>&1
-reg add "HKLM\SOFTWARE\Policies\Microsoft\Windows\DriverSearching" /v SearchOrderConfig /t REG_DWORD /d 0 /f >nul 2>&1
-reg add "HKLM\SOFTWARE\Policies\Microsoft\Windows\DeliveryOptimization" /v DODownloadMode /t REG_DWORD /d 0 /f >nul 2>&1
-reg add "HKLM\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate\AU" /v NoAutoRebootWithLoggedOnUsers /t REG_DWORD /d 1 /f >nul 2>&1
-
-call :log_error "Windows Update - Ottimizzazione" 0
-
-echo [OK] Windows Update ottimizzato
-call :progress 95 "Update"
 
 :: =====================================
 :: DISM CLEANUP

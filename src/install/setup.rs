@@ -143,6 +143,15 @@ pub const SCRIPTS: &[Script] = &[
         bytes: embed!("ImportaTaskbar.bat"),
     },
     Script {
+        group: OPTIMIZE_GROUP,
+        label: "Cerca e installa driver mancanti",
+        desc: "Rileva i dispositivi senza driver, installa quelli della cartella «Driver» accanto allo script (facoltativa) e cerca gli altri su Windows Update, chiedendo conferma. Se Windows Update è disattivato lo dice e non lo riattiva.",
+        file: "CercaDriver.bat",
+        kind: Kind::Bat,
+        impact: Impact::Normal,
+        bytes: embed!("CercaDriver.bat"),
+    },
+    Script {
         group: "Extra",
         label: "«Apri PowerShell/Prompt qui» nel tasto destro",
         desc: "Aggiunge al tasto destro su cartelle e sfondo le voci per aprire PowerShell e il Prompt dei comandi nella cartella. In Windows 11 stanno sotto «Mostra altre opzioni».",
@@ -388,7 +397,14 @@ mod tests {
             .filter(|s| in_set(s, Set::Optimize))
             .map(|s| s.label)
             .collect();
-        assert_eq!(opt, vec!["Ottimizza Windows", "Blocca Windows Update"]);
+        assert_eq!(
+            opt,
+            vec![
+                "Ottimizza Windows",
+                "Blocca Windows Update",
+                "Cerca e installa driver mancanti"
+            ]
+        );
         let cfg = SCRIPTS.iter().filter(|s| in_set(s, Set::Config)).count();
         assert_eq!(cfg + opt.len(), SCRIPTS.len());
         assert!(SCRIPTS
@@ -525,6 +541,70 @@ mod tests {
         prepare(s, &d).unwrap();
         assert!(d.join("Lingue").is_dir());
         let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn optimize_no_longer_touches_windows_update() {
+        let t = script_text("Ottimizza.bat");
+        assert!(
+            t.contains("DISM CLEANUP"),
+            "il resto dello script c'è ancora"
+        );
+        for vietato in [
+            "Policies\\Microsoft\\Windows\\WindowsUpdate",
+            "DriverSearching",
+            "DeliveryOptimization",
+            "Automatic App Update",
+            "wuauserv",
+        ] {
+            assert!(
+                !t.contains(vietato),
+                "Ottimizza non deve più toccare: {vietato}"
+            );
+        }
+    }
+
+    #[test]
+    fn driver_script_searches_without_changing_update_settings() {
+        let trovati: Vec<_> = SCRIPTS
+            .iter()
+            .filter(|s| s.file == "CercaDriver.bat")
+            .collect();
+        assert_eq!(trovati.len(), 1, "CercaDriver.bat nella tabella");
+        for s in trovati {
+            assert_eq!((s.kind, s.impact), (Kind::Bat, Impact::Normal));
+            assert!(in_set(s, Set::Optimize) && !in_set(s, Set::Config));
+        }
+        let t = script_text("CercaDriver.bat");
+        assert!(t.is_ascii());
+        // Cerca i driver su Windows Update e nella cartella locale.
+        assert!(t.contains("Microsoft.Update.Session"));
+        assert!(t.contains("Type='Driver'"));
+        assert!(t.contains("pnputil /scan-devices"));
+        assert!(t.contains("pnputil /add-driver"));
+        assert!(t.contains("'Driver'"));
+        // Chiede conferma e rispetta un Windows Update disattivato.
+        assert!(t.contains("Read-Host"));
+        assert!(t.contains("StartType -eq 'Disabled'"));
+        for vietato in [
+            "sc config",
+            "reg add",
+            "reg delete",
+            "Start-Service",
+            "Set-Service",
+            "net start",
+            "sc start",
+        ] {
+            assert!(
+                !t.contains(vietato),
+                "non deve cambiare servizi o criteri: {vietato}"
+            );
+        }
+        // Il codice PowerShell parte dal solo marcatore finale, mai dalla riga di lancio.
+        assert_eq!(t.matches("#PS#").count(), 1);
+        assert!(t.contains("'#PS'+'#'"));
+        let (prima, dopo) = t.split_once("\n#PS#").unwrap_or(("", ""));
+        assert!(prima.contains("exit /b 0") && !dopo.is_empty());
     }
 
     #[test]
