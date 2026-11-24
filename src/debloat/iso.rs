@@ -47,6 +47,25 @@ impl Compression {
     }
 }
 
+/// Cosa produce alla fine: una ISO avviabile pronta da masterizzare/scrivere su chiavetta,
+/// oppure solo il file install.wim (o install.esd) con le voci già applicate, senza costruire
+/// nessuna ISO: in questo caso il metodo di creazione ISO e oscdimg non servono.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Output {
+    Iso,
+    Wim,
+}
+
+impl Output {
+    pub const ALL: [Output; 2] = [Output::Iso, Output::Wim];
+    pub fn label(self) -> &'static str {
+        match self {
+            Output::Iso => "ISO avviabile",
+            Output::Wim => "Solo install.wim / install.esd (niente ISO)",
+        }
+    }
+}
+
 /// Come si crea il file .iso finale.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum IsoMethod {
@@ -75,7 +94,9 @@ pub struct Edition {
 #[derive(Clone, Debug)]
 pub struct Plan {
     pub iso_in: PathBuf,
+    /// La ISO finale (`Output::Iso`) o il file install.wim/install.esd (`Output::Wim`).
     pub iso_out: PathBuf,
+    pub output: Output,
     /// Cartella di lavoro: ci vuole spazio per circa 3 volte la ISO.
     pub work: PathBuf,
     /// Indici delle edizioni da tenere.
@@ -231,8 +252,13 @@ pub fn validate(p: &Plan) -> Result<(), String> {
     if !p.iso_in.is_file() || !is_ext(&p.iso_in, "iso") {
         return Err("Scegli il file .iso di Windows 11".into());
     }
-    if !is_ext(&p.iso_out, "iso") {
-        return Err("Il file di uscita deve finire con .iso".into());
+    let want_ext = match p.output {
+        Output::Iso => "iso",
+        Output::Wim if p.compression == Compression::Esd => "esd",
+        Output::Wim => "wim",
+    };
+    if !is_ext(&p.iso_out, want_ext) {
+        return Err(format!("Il file di uscita deve finire con .{want_ext}"));
     }
     let out_dir = p
         .iso_out
@@ -255,7 +281,7 @@ pub fn validate(p: &Plan) -> Result<(), String> {
     if p.editions.is_empty() {
         return Err("Scegli almeno un'edizione da tenere".into());
     }
-    if !p.oscdimg.is_file() {
+    if p.output == Output::Iso && !p.oscdimg.is_file() {
         return Err(
             "oscdimg.exe non trovato: installa il Windows ADK (Deployment Tools) o indica il file"
                 .into(),
@@ -660,6 +686,10 @@ pub fn process(
 ) -> Result<(), String> {
     let items = selected_items(&plan.items)?;
     process_install(sys, plan, iso, work, &items, log)?;
+    if plan.output != Output::Iso {
+        // boot.wim, i file da togliere e autounattend.xml riguardano solo una ISO avviabile.
+        return Ok(());
+    }
     process_boot(sys, plan, iso, work, log)?;
     if plan.delete_files {
         let removed = delete_iso_files(iso, &plan.keep_langs);
@@ -872,12 +902,38 @@ pub fn build(sys: &dyn Sys, plan: &Plan, log: &mut dyn FnMut(Kind, &str)) -> Res
         let _ = dism(sys, &["/Cleanup-Wim"]);
         return Err(e);
     }
-    log(Kind::Info, "Creo la ISO avviabile…");
-    build_iso_file(sys, plan, &iso, log)?;
+    match plan.output {
+        Output::Iso => {
+            log(Kind::Info, "Creo la ISO avviabile…");
+            build_iso_file(sys, plan, &iso, log)?;
+        }
+        Output::Wim => {
+            let name = if plan.compression == Compression::Esd {
+                "install.esd"
+            } else {
+                "install.wim"
+            };
+            let produced = iso.join("sources").join(name);
+            log(Kind::Info, &format!("Copio {name}…"));
+            fs::copy(&produced, &plan.iso_out)
+                .map_err(|e| format!("{}: {e}", plan.iso_out.display()))?;
+            if fs::metadata(&plan.iso_out).map(|m| m.len()).unwrap_or(0) == 0 {
+                let _ = fs::remove_file(&plan.iso_out);
+                return Err(format!("{name} non è stato creato"));
+            }
+        }
+    }
     if plan.delete_work {
         let _ = fs::remove_dir_all(&work);
     }
-    log(Kind::Ok, &format!("ISO pronta: {}", plan.iso_out.display()));
+    let fatto = plan
+        .iso_out
+        .file_name()
+        .map_or(String::new(), |n| n.to_string_lossy().to_string());
+    log(
+        Kind::Ok,
+        &format!("{fatto} pronto: {}", plan.iso_out.display()),
+    );
     Ok(())
 }
 
@@ -906,6 +962,7 @@ mod tests {
         Plan {
             iso_in: d.join("in.iso"),
             iso_out: d.join("out.iso"),
+            output: Output::Iso,
             work: d.join("lavoro"),
             editions: vec![6],
             items: vec!["news".into(), "ctx".into()],
@@ -1318,6 +1375,69 @@ mod tests {
             ));
         }
         (sys, p)
+    }
+
+    #[test]
+    fn validate_output_wim_wants_matching_extension_and_no_oscdimg() {
+        let d = tmp("val_wim");
+        let mut p = plan(&d);
+        p.output = Output::Wim;
+        // niente oscdimg.exe: con Output::Wim non deve servire.
+        fs::remove_file(&p.oscdimg).unwrap();
+
+        p.iso_out = d.join("out.iso"); // compressione Max -> vuole .wim
+        assert!(validate(&p).unwrap_err().contains(".wim"));
+
+        p.iso_out = d.join("out.esd"); // compressione Max -> vuole .wim
+        assert!(validate(&p).unwrap_err().contains(".wim"));
+
+        p.iso_out = d.join("out.wim");
+        assert!(validate(&p).is_ok());
+
+        p.compression = Compression::Esd;
+        assert!(validate(&p).unwrap_err().contains(".esd"));
+        p.iso_out = d.join("out.esd");
+        assert!(validate(&p).is_ok());
+        let _ = fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn wim_only_skips_iso_building_and_boot_wim_and_copies_the_file() {
+        let d = tmp("wim_only");
+        let (sys, mut p) = full_env(&d, false);
+        p.output = Output::Wim;
+        p.iso_out = d.join("install.wim");
+        p.delete_work = false;
+        let mut log = Vec::new();
+        build(&sys, &p, &mut |k, m| log.push((k, m.to_string()))).unwrap();
+
+        let c = sys.commands.borrow().clone();
+        assert!(!c.iter().any(|x| x.contains("IMAPI2FS")));
+        assert!(!c.iter().any(|x| x.contains("oscdimg")));
+        assert!(p.iso_out.is_file());
+        assert_eq!(fs::read(&p.iso_out).unwrap(), b"nuovo");
+        assert!(log
+            .iter()
+            .any(|(k, m)| *k == Kind::Ok && m.contains("install.wim pronto")));
+
+        // boot.wim, file da togliere e autounattend.xml riguardano solo l'ISO: niente lavoro in più.
+        let iso_dir = p.work.join(WORK_SUB).join("iso");
+        assert!(!iso_dir.join("autounattend.xml").exists());
+        let _ = fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn wim_only_with_esd_compression_produces_install_esd() {
+        let d = tmp("wim_only_esd");
+        let (sys, mut p) = full_env(&d, false);
+        p.output = Output::Wim;
+        p.compression = Compression::Esd;
+        p.iso_out = d.join("install.esd");
+        p.delete_work = false;
+        build(&sys, &p, &mut |_, _| {}).unwrap();
+        assert!(p.iso_out.is_file());
+        assert_eq!(fs::read(&p.iso_out).unwrap(), b"nuovo");
+        let _ = fs::remove_dir_all(&d);
     }
 
     #[test]

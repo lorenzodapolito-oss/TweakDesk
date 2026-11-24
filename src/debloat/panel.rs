@@ -4,7 +4,7 @@ use crate::clean::engine::RealEnv;
 use crate::clean::sys::{RealSys, Sys};
 use crate::debloat::apply::{self, Kind};
 use crate::debloat::catalog::{items_for, Group, Item, Level};
-use crate::debloat::iso::{self, Compression, Edition, IsoMethod, Plan};
+use crate::debloat::iso::{self, Compression, Edition, IsoMethod, Output, Plan};
 use crate::debloat::netfix;
 use crate::debloat::target::Target;
 use crate::debloat::unattend;
@@ -73,6 +73,7 @@ pub struct DebloatPanel {
     iso_in: String,
     iso_out: String,
     work: String,
+    output: Output,
     oscdimg: String,
     method: IsoMethod,
     editions: Vec<(Edition, bool)>,
@@ -115,6 +116,7 @@ impl DebloatPanel {
                 .to_string_lossy()
                 .to_string(),
             work: base.to_string_lossy().to_string(),
+            output: Output::Iso,
             oscdimg,
             method: IsoMethod::Imapi,
             editions: Vec::new(),
@@ -204,7 +206,9 @@ impl DebloatPanel {
             let t2 = tx.clone();
             let t3 = tx.clone();
             let stamp = chrono::Local::now().format("%Y%m%d-%H%M%S");
-            let file = app_dir().join("BackupDebloat").join(format!("annulla-{stamp}.json"));
+            let file = app_dir()
+                .join("BackupDebloat")
+                .join(format!("annulla-{stamp}.json"));
             // Il file «Annulla» si riscrive a ogni modifica, prima di farla: anche se il
             // programma si chiude a metà, si può tornare indietro.
             let mut save_err: Option<String> = None;
@@ -226,12 +230,18 @@ impl DebloatPanel {
             );
             let msg = match (&save_err, undo.is_empty()) {
                 (Some(e), _) => format!("Annulla non salvato: {e}"),
-                (None, false) => format!("Per tornare indietro: pulsante «Annulla». {} modifiche salvate.", undo.len()),
+                (None, false) => format!(
+                    "Per tornare indietro: pulsante «Annulla». {} modifiche salvate.",
+                    undo.len()
+                ),
                 (None, true) => String::new(),
             };
             let _ = tx.send(Event::Log(
                 Kind::Ok,
-                format!("Finito: {} fatte, {} senza effetto, {} fallite. {msg}", rep.done, rep.skipped, rep.failed),
+                format!(
+                    "Finito: {} fatte, {} senza effetto, {} fallite. {msg}",
+                    rep.done, rep.skipped, rep.failed
+                ),
             ));
             let f = apply::followup(&items);
             if let Some(m) = f.message() {
@@ -364,6 +374,7 @@ impl DebloatPanel {
         Plan {
             iso_in: PathBuf::from(self.iso_in.trim()),
             iso_out: PathBuf::from(self.iso_out.trim()),
+            output: self.output,
             work: PathBuf::from(self.work.trim()),
             editions: self
                 .editions
@@ -560,44 +571,67 @@ impl DebloatPanel {
                 Self::path_row(ui, "ISO di Windows 11 da modificare:", &mut self.iso_in, || {
                     rfd::FileDialog::new().add_filter("ISO", &["iso"]).pick_file()
                 });
-                Self::path_row(ui, "ISO da creare:", &mut self.iso_out, || {
-                    rfd::FileDialog::new().add_filter("ISO", &["iso"]).set_file_name("Windows11-TweakDesk.iso").save_file()
-                });
-                Self::path_row(ui, "Cartella di lavoro (serve spazio per circa 3 volte la ISO):", &mut self.work, || {
-                    rfd::FileDialog::new().pick_folder()
-                });
                 ui.horizontal(|ui| {
-                    ui.label("Metodo per creare la ISO:");
-                    egui::ComboBox::from_id_salt("iso_method")
-                        .selected_text(self.method.label())
+                    ui.label("Cosa creare:");
+                    egui::ComboBox::from_id_salt("iso_output")
+                        .selected_text(self.output.label())
                         .show_ui(ui, |ui| {
-                            for m in IsoMethod::ALL {
-                                ui.selectable_value(&mut self.method, m, m.label());
+                            for o in Output::ALL {
+                                ui.selectable_value(&mut self.output, o, o.label());
                             }
                         });
                 });
-                Self::path_row(ui, "oscdimg.exe (solo per il metodo ADK o come ripiego se IMAPI non riesce):", &mut self.oscdimg, || {
-                    rfd::FileDialog::new().add_filter("oscdimg", &["exe"]).pick_file()
+                let wim_ext = if self.compression == Compression::Esd { "esd" } else { "wim" };
+                match self.output {
+                    Output::Iso => Self::path_row(ui, "ISO da creare:", &mut self.iso_out, || {
+                        rfd::FileDialog::new().add_filter("ISO", &["iso"]).set_file_name("Windows11-TweakDesk.iso").save_file()
+                    }),
+                    Output::Wim => Self::path_row(ui, "File da creare:", &mut self.iso_out, || {
+                        rfd::FileDialog::new().add_filter(wim_ext, &[wim_ext]).set_file_name(format!("install.{wim_ext}")).save_file()
+                    }),
+                }
+                Self::path_row(ui, "Cartella di lavoro (serve spazio per circa 3 volte la ISO):", &mut self.work, || {
+                    rfd::FileDialog::new().pick_folder()
                 });
+                if self.output == Output::Iso {
+                    ui.horizontal(|ui| {
+                        ui.label("Metodo per creare la ISO:");
+                        egui::ComboBox::from_id_salt("iso_method")
+                            .selected_text(self.method.label())
+                            .show_ui(ui, |ui| {
+                                for m in IsoMethod::ALL {
+                                    ui.selectable_value(&mut self.method, m, m.label());
+                                }
+                            });
+                    });
+                    Self::path_row(ui, "oscdimg.exe (solo per il metodo ADK o come ripiego se IMAPI non riesce):", &mut self.oscdimg, || {
+                        rfd::FileDialog::new().add_filter("oscdimg", &["exe"]).pick_file()
+                    });
+                }
             });
-            if self.method == IsoMethod::Oscdimg && self.oscdimg.trim().is_empty() {
+            if self.output == Output::Wim {
+                ui.label(RichText::new("Niente ISO: solo il file con le voci già applicate. Non serve IMAPI né il Windows ADK/oscdimg.").color(theme::MUTED));
+            }
+            if self.output == Output::Iso && self.method == IsoMethod::Oscdimg && self.oscdimg.trim().is_empty() {
                 ui.label(RichText::new("oscdimg.exe non trovato: scarica e installa il Windows ADK (solo «Deployment Tools») con il pulsante, oppure indica il file.").color(theme::WARN));
             }
-            ui.horizontal(|ui| {
-                let can = !self.busy && self.is_admin;
-                if ui
-                    .add_enabled(can, egui::Button::new(RichText::new("Scarica e installa ADK (Deployment Tools)").strong()).fill(theme::DOWNLOAD))
-                    .clicked()
-                {
-                    self.install_adk(ctx);
-                }
-                if ui.button("Apri la pagina ufficiale dell'ADK").clicked() {
-                    let _ = RealSys.run("cmd", &["/c", "start", "", iso::ADK_PAGE]);
-                }
-                if !self.is_admin {
-                    ui.label(RichText::new("Servono i permessi di amministratore.").color(theme::WARN));
-                }
-            });
+            if self.output == Output::Iso {
+                ui.horizontal(|ui| {
+                    let can = !self.busy && self.is_admin;
+                    if ui
+                        .add_enabled(can, egui::Button::new(RichText::new("Scarica e installa ADK (Deployment Tools)").strong()).fill(theme::DOWNLOAD))
+                        .clicked()
+                    {
+                        self.install_adk(ctx);
+                    }
+                    if ui.button("Apri la pagina ufficiale dell'ADK").clicked() {
+                        let _ = RealSys.run("cmd", &["/c", "start", "", iso::ADK_PAGE]);
+                    }
+                    if !self.is_admin {
+                        ui.label(RichText::new("Servono i permessi di amministratore.").color(theme::WARN));
+                    }
+                });
+            }
             ui.label(RichText::new("Se la cartella di lavoro ha spazi, accenti o è lunga, uso automaticamente una cartella corta (es. C:\\TDwork).").color(theme::MUTED));
             ui.add_space(6.0);
             egui::CollapsingHeader::new(RichText::new("ISO da UUP dump (ultima versione con gli aggiornamenti)").strong().size(16.0))
@@ -691,13 +725,16 @@ impl DebloatPanel {
                                 }
                             });
                     });
-                    ui.checkbox(&mut self.boot_clean, "boot.wim: pulisci i componenti superati");
-                    ui.checkbox(&mut self.boot_bypass, "boot.wim: salta i controlli di TPM, Secure Boot, RAM e CPU nell'installazione");
-                    ui.checkbox(&mut self.boot_setup_only, "boot.wim: tieni solo Setup (indice 2), togli WinPE (indice 1)");
-                    ui.checkbox(&mut self.delete_files, "Togli dalla ISO file inutili (autorun, support, lingue non usate)");
+                    if self.output == Output::Iso {
+                        ui.checkbox(&mut self.boot_clean, "boot.wim: pulisci i componenti superati");
+                        ui.checkbox(&mut self.boot_bypass, "boot.wim: salta i controlli di TPM, Secure Boot, RAM e CPU nell'installazione");
+                        ui.checkbox(&mut self.boot_setup_only, "boot.wim: tieni solo Setup (indice 2), togli WinPE (indice 1)");
+                        ui.checkbox(&mut self.delete_files, "Togli dalla ISO file inutili (autorun, support, lingue non usate)");
+                    }
                     ui.checkbox(&mut self.compact_registry, "Compatta i file di registro (guadagno piccolo)");
                     ui.checkbox(&mut self.delete_work, "Cancella la cartella di lavoro alla fine");
                 });
+            if self.output == Output::Iso {
             egui::CollapsingHeader::new(RichText::new("Installazione automatica (file di risposte)").strong().size(16.0))
                 .default_open(true)
                 .show(ui, |ui| {
@@ -731,6 +768,7 @@ impl DebloatPanel {
                         ui.label(RichText::new("La password resta scritta in chiaro dentro la ISO.").small().color(theme::WARN));
                     }
                 });
+            }
             ui.add_space(6.0);
             ui.label(RichText::new("Voci da applicare a ogni edizione").strong().size(16.0));
             Self::items_ui(ui, true, &mut self.iso_items);
@@ -738,7 +776,11 @@ impl DebloatPanel {
             let ready = !self.busy
                 && self.is_admin
                 && self.editions.iter().any(|(_, on)| *on);
-            if Self::big_button(ui, "Crea la ISO", theme::DOWNLOAD, ready) {
+            let label = match self.output {
+                Output::Iso => "Crea la ISO",
+                Output::Wim => "Crea il file",
+            };
+            if Self::big_button(ui, label, theme::DOWNLOAD, ready) {
                 self.build_iso(ctx);
             }
             if self.editions.is_empty() {
