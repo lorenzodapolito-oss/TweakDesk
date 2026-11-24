@@ -90,6 +90,13 @@ pub struct DebloatPanel {
     un: unattend::Options,
 }
 
+/// Cambia l'estensione di un percorso, tenendo cartella e nome: usata quando l'utente
+/// passa tra ISO e install.wim/esd, così il campo del file segue la scelta.
+fn swap_ext(path: &str, ext: &str) -> String {
+    let p = std::path::Path::new(path.trim());
+    p.with_extension(ext).to_string_lossy().to_string()
+}
+
 impl DebloatPanel {
     pub fn new() -> Self {
         let (tx, rx) = channel();
@@ -573,6 +580,7 @@ impl DebloatPanel {
                 });
                 ui.horizontal(|ui| {
                     ui.label("Cosa creare:");
+                    let prev = self.output;
                     egui::ComboBox::from_id_salt("iso_output")
                         .selected_text(self.output.label())
                         .show_ui(ui, |ui| {
@@ -580,6 +588,14 @@ impl DebloatPanel {
                                 ui.selectable_value(&mut self.output, o, o.label());
                             }
                         });
+                    if self.output != prev {
+                        let ext = match self.output {
+                            Output::Iso => "iso",
+                            Output::Wim if self.compression == Compression::Esd => "esd",
+                            Output::Wim => "wim",
+                        };
+                        self.iso_out = swap_ext(&self.iso_out, ext);
+                    }
                 });
                 let wim_ext = if self.compression == Compression::Esd { "esd" } else { "wim" };
                 match self.output {
@@ -717,6 +733,7 @@ impl DebloatPanel {
                 .show(ui, |ui| {
                     ui.horizontal(|ui| {
                         ui.label("Compressione:");
+                        let prev = self.compression;
                         egui::ComboBox::from_id_salt("iso_comp")
                             .selected_text(self.compression.label())
                             .show_ui(ui, |ui| {
@@ -724,6 +741,12 @@ impl DebloatPanel {
                                     ui.selectable_value(&mut self.compression, c, c.label());
                                 }
                             });
+                        // Il file di uscita segue la compressione solo quando si crea solo il WIM/ESD:
+                        // per una ISO la compressione è dentro, non cambia l'estensione del file.
+                        if self.output == Output::Wim && self.compression != prev {
+                            let ext = if self.compression == Compression::Esd { "esd" } else { "wim" };
+                            self.iso_out = swap_ext(&self.iso_out, ext);
+                        }
                     });
                     if self.output == Output::Iso {
                         ui.checkbox(&mut self.boot_clean, "boot.wim: pulisci i componenti superati");
@@ -867,6 +890,25 @@ impl DebloatPanel {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn swap_ext_keeps_folder_and_stem() {
+        assert_eq!(
+            swap_ext("C:\\out\\Windows11-TweakDesk.iso", "wim"),
+            "C:\\out\\Windows11-TweakDesk.wim"
+        );
+        assert_eq!(
+            swap_ext("C:\\out\\install.wim", "esd"),
+            "C:\\out\\install.esd"
+        );
+        assert_eq!(
+            swap_ext("  C:\\out\\install.esd  ", "wim"),
+            "C:\\out\\install.wim"
+        );
+        assert_eq!(swap_ext("senza_estensione", "wim"), "senza_estensione.wim");
+        // Un percorso vuoto non ha un nome a cui attaccare l'estensione: resta vuoto.
+        assert_eq!(swap_ext("", "iso"), "");
+    }
 
     #[test]
     fn presets_follow_levels() {
