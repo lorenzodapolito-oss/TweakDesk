@@ -34,6 +34,10 @@ echo.
 echo Conseguenze: niente aggiornamenti di sicurezza, anche per Microsoft
 echo Defender. Nessuno script di questo programma lo annulla.
 echo.
+echo ATTENZIONE: disattiva ora la protezione comportamentale del tuo
+echo antivirus (per esempio Advanced Threat Defense di Bitdefender), altrimenti
+echo lo blocchera a meta durante lesecuzione. Riattivala appena finito.
+echo.
 choice /c SN /m "Vuoi continuare"
 if errorlevel 2 exit /b 0
 

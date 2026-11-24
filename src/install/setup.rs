@@ -91,7 +91,7 @@ pub const SCRIPTS: &[Script] = &[
     Script {
         group: OPTIMIZE_GROUP,
         label: "Blocca Windows Update",
-        desc: "Blocca Windows Update in modo definitivo: servizi, attività, WaaSMedic, programmi di aggiornamento, criteri, hosts e firewall, con un controllo orario che rimette il blocco. Nessun ripristino.",
+        desc: "Blocca Windows Update in modo definitivo: servizi, attività, WaaSMedic, programmi di aggiornamento, criteri, hosts e firewall, con un controllo orario che rimette il blocco. Nessun ripristino. Disattiva prima la protezione comportamentale dell'antivirus (es. Advanced Threat Defense), altrimenti lo interrompe a metà.",
         file: "updateKill.bat",
         kind: Kind::Bat,
         impact: Impact::High,
@@ -541,6 +541,28 @@ mod tests {
         prepare(s, &d).unwrap();
         assert!(d.join("Lingue").is_dir());
         let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn update_block_warns_about_antivirus_first() {
+        let s = SCRIPTS
+            .iter()
+            .find(|s| s.file == "updateKill.bat")
+            .expect("updateKill.bat nella tabella");
+        assert!(
+            s.desc.contains("antivirus"),
+            "avviso antivirus nella descrizione"
+        );
+        let t = script_text("updateKill.bat");
+        let av = t.to_lowercase();
+        assert!(av.contains("antivirus"), "avviso antivirus nello script");
+        // L'avviso deve comparire prima della domanda di conferma, non dopo.
+        let i_av = av.find("antivirus").unwrap();
+        let i_choice = av.find("choice /c sn").unwrap();
+        assert!(
+            i_av < i_choice,
+            "l'avviso va prima della domanda di conferma"
+        );
     }
 
     #[test]
