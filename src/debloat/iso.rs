@@ -121,6 +121,9 @@ pub struct Plan {
     pub oscdimg: PathBuf,
     /// Cancella la cartella di lavoro alla fine.
     pub delete_work: bool,
+    /// All'avvio di Windows installato da questa immagine, salta la richiesta di
+    /// account Microsoft/connessione di rete: va subito alla creazione dell'account locale.
+    pub bypass_oobe: bool,
 }
 
 const WORK_SUB: &str = "TweakDesk-ISO";
@@ -550,6 +553,52 @@ fn add_updates(
     Ok(())
 }
 
+/// Fa sì che, al primo avvio di Windows installato da questa immagine, l'OOBE
+/// salti la richiesta di account Microsoft/connessione di rete e vada subito
+/// alla creazione dell'account locale. Scrive direttamente nel registro
+/// dell'immagine montata (nessun file di risposte necessario): vale anche
+/// quando si crea solo install.wim, senza un autounattend.xml sulla ISO.
+fn bypass_oobe(
+    sys: &dyn Sys,
+    target: &Target,
+    log: &mut dyn FnMut(Kind, &str),
+) -> Result<(), String> {
+    target.load_hives(sys)?;
+    let result: Result<(), String> = (|| {
+        // Due chiavi: la prima per le build più vecchie, la seconda per quelle più
+        // recenti che l'hanno spostata; le scriviamo entrambe per sicurezza.
+        for key in [
+            "HKLM\\SYSTEM\\Setup\\OOBE",
+            "HKLM\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\OOBE",
+        ] {
+            let mapped = target.map_key(key)?;
+            sys.run(
+                "reg",
+                &[
+                    "add",
+                    &mapped,
+                    "/v",
+                    "BypassNRO",
+                    "/t",
+                    "REG_DWORD",
+                    "/d",
+                    "1",
+                    "/f",
+                ],
+            )
+            .map_err(|e| format!("Salto OOBE non scritto in {key}: {e}"))?;
+        }
+        Ok(())
+    })();
+    target.unload_hives(sys);
+    result?;
+    log(
+        Kind::Ok,
+        "Account Microsoft/rete: l'installazione andrà subito alla creazione dell'account locale.",
+    );
+    Ok(())
+}
+
 fn process_install(
     sys: &dyn Sys,
     plan: &Plan,
@@ -611,6 +660,11 @@ fn process_install(
             match apply::compact_hives(&target, sys, work) {
                 Ok(c) => log(Kind::Ok, &format!("Registro compattato ({c} rami)")),
                 Err(e) => log(Kind::Warn, &format!("Registro non compattato: {e}")),
+            }
+        }
+        if plan.bypass_oobe {
+            if let Err(e) = bypass_oobe(sys, &target, log) {
+                log(Kind::Warn, &format!("Salto OOBE non riuscito: {e}"));
             }
         }
         log(
@@ -1000,6 +1054,7 @@ mod tests {
             method: IsoMethod::Imapi,
             oscdimg: d.join("oscdimg.exe"),
             delete_work: true,
+            bypass_oobe: false,
         }
     }
 
@@ -1477,6 +1532,75 @@ l'esecuzione con privilegi elevati.";
         build(&sys, &p, &mut |_, _| {}).unwrap();
         assert!(p.iso_out.is_file());
         assert_eq!(fs::read(&p.iso_out).unwrap(), b"nuovo");
+        let _ = fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn bypass_oobe_writes_both_registry_keys_offline_and_unloads_hives() {
+        let sys = FakeSys::default();
+        let target = Target::offline(Path::new("D:\\mnt"));
+        let mut log = Vec::new();
+        bypass_oobe(&sys, &target, &mut |k, m| log.push((k, m.to_string()))).unwrap();
+        let c = sys.commands.borrow().clone();
+        assert!(c.iter().any(
+            |x| x.contains("reg add HKLM\\zTD_SYSTEM\\Setup\\OOBE") && x.contains("BypassNRO")
+        ));
+        assert!(c.iter().any(|x| x
+            .contains("reg add HKLM\\zTD_SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\OOBE")
+            && x.contains("BypassNRO")));
+        assert!(c
+            .first()
+            .unwrap()
+            .starts_with("reg load HKLM\\zTD_SOFTWARE"));
+        assert!(c.last().unwrap().starts_with("reg unload"));
+        assert!(log.iter().any(|(k, _)| *k == Kind::Ok));
+    }
+
+    #[test]
+    fn bypass_oobe_failure_still_unloads_hives_and_is_reported() {
+        let sys = FakeSys::default();
+        sys.failing.borrow_mut().push("BypassNRO".into());
+        let target = Target::offline(Path::new("D:\\mnt"));
+        let mut log = Vec::new();
+        assert!(bypass_oobe(&sys, &target, &mut |k, m| log.push((k, m.to_string()))).is_err());
+        let c = sys.commands.borrow().clone();
+        assert!(c.iter().any(|x| x.starts_with("reg unload")));
+    }
+
+    #[test]
+    fn process_install_skips_oobe_bypass_when_disabled() {
+        // plan() di test ha bypass_oobe: false di default.
+        let d = tmp("no_oobe");
+        let (sys, mut p) = full_env(&d, false);
+        p.output = Output::Wim;
+        p.iso_out = d.join("install.wim");
+        build(&sys, &p, &mut |_, _| {}).unwrap();
+        assert!(!sys
+            .commands
+            .borrow()
+            .iter()
+            .any(|x| x.contains("BypassNRO")));
+        let _ = fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn process_install_applies_oobe_bypass_when_enabled() {
+        let d = tmp("oobe_on");
+        let (sys, mut p) = full_env(&d, false);
+        p.output = Output::Wim;
+        p.iso_out = d.join("install.wim");
+        p.bypass_oobe = true;
+        p.delete_work = false;
+        let mut log = Vec::new();
+        build(&sys, &p, &mut |k, m| log.push((k, m.to_string()))).unwrap();
+        assert!(sys
+            .commands
+            .borrow()
+            .iter()
+            .any(|x| x.contains("BypassNRO")));
+        assert!(log
+            .iter()
+            .any(|(k, m)| *k == Kind::Ok && m.contains("creazione dell'account locale")));
         let _ = fs::remove_dir_all(&d);
     }
 

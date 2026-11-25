@@ -86,6 +86,7 @@ pub struct DebloatPanel {
     delete_files: bool,
     compact_registry: bool,
     delete_work: bool,
+    bypass_oobe: bool,
     use_unattend: bool,
     un: unattend::Options,
 }
@@ -136,6 +137,7 @@ impl DebloatPanel {
             delete_files: true,
             compact_registry: false,
             delete_work: true,
+            bypass_oobe: true,
             use_unattend: true,
             un: unattend::Options::default(),
         }
@@ -405,6 +407,7 @@ impl DebloatPanel {
             method: self.method,
             oscdimg: PathBuf::from(self.oscdimg.trim()),
             delete_work: self.delete_work,
+            bypass_oobe: self.bypass_oobe,
         }
     }
 
@@ -764,6 +767,10 @@ impl DebloatPanel {
                     }
                     ui.checkbox(&mut self.compact_registry, "Compatta i file di registro (guadagno piccolo)");
                     ui.checkbox(&mut self.delete_work, "Cancella la cartella di lavoro alla fine");
+                    ui.checkbox(
+                        &mut self.bypass_oobe,
+                        "All'avvio salta la richiesta di account Microsoft: vai subito alla creazione dell'account locale",
+                    );
                 });
             if self.output == Output::Iso {
             egui::CollapsingHeader::new(RichText::new("Installazione automatica (file di risposte)").strong().size(16.0))
