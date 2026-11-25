@@ -112,10 +112,17 @@ fn harmonize(v: &mut egui::Visuals) {
 }
 
 /// Larghezza di un campo di testo (percorso file/cartella) affiancato da un pulsante
-/// «Scegli…»: lascia sempre spazio al pulsante, così in una finestra stretta il campo
-/// si restringe invece di essere tagliato a destra (fuori dall'area visibile/scorrevole).
+/// «Scegli…» (o altri pulsanti sulla stessa riga): lascia sempre loro lo spazio
+/// indicato in `reserve`, così in una finestra stretta è il campo a restringersi
+/// (mai sotto un minimo usabile) invece di essere tagliato a destra, fuori
+/// dall'area visibile/scorrevole.
+pub fn field_width(available: f32, reserve: f32) -> f32 {
+    (available - reserve).max(80.0)
+}
+
+/// Campo di testo (percorso file/cartella) affiancato da un solo pulsante «Scegli…».
 pub fn path_field_width(available: f32) -> f32 {
-    (available - 100.0).max(80.0)
+    field_width(available, 100.0)
 }
 
 /// Le righe del registro, una per riga, come le vede chi le copia.
@@ -195,6 +202,16 @@ pub fn apply(ctx: &egui::Context) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn field_width_respects_any_reserve_and_floor() {
+        assert_eq!(field_width(600.0, 170.0), 430.0);
+        assert_eq!(
+            field_width(100.0, 170.0),
+            80.0,
+            "non scende sotto il minimo"
+        );
+    }
 
     #[test]
     fn path_field_width_shrinks_but_never_disappears() {

@@ -73,7 +73,10 @@ pub fn assoc_dialog(ctx: &egui::Context, a: &mut Assoc, name: &str) -> AssocAct 
         .default_width(520.0)
         .show(ctx, |ui| {
             ui.horizontal(|ui| {
-                let te = ui.add(egui::TextEdit::singleline(&mut a.query).desired_width(280.0));
+                // Lascia sempre posto ai due pulsanti («Cerca» e «Chiudi»): altrimenti in
+                // una finestra stretta uno dei due finisce fuori dall'area visibile.
+                let width = theme::field_width(ui.available_width(), 170.0);
+                let te = ui.add(egui::TextEdit::singleline(&mut a.query).desired_width(width));
                 let go = ui
                     .add_enabled(!a.busy, egui::Button::new("Cerca"))
                     .clicked()
@@ -96,8 +99,13 @@ pub fn assoc_dialog(ctx: &egui::Context, a: &mut Assoc, name: &str) -> AssocAct 
                 .max_height(260.0)
                 .show(ui, |ui| {
                     for p in &a.results {
+                        // Troncato: id e versione possono essere lunghi quanto basta da uscire
+                        // dalla finestra, e i pulsanti non vanno a capo da soli.
                         if ui
-                            .button(format!("{} — {} ({})", p.name, p.id, p.version))
+                            .add(
+                                egui::Button::new(format!("{} — {} ({})", p.name, p.id, p.version))
+                                    .truncate(),
+                            )
                             .clicked()
                         {
                             act = AssocAct::Choose(p.id.clone());

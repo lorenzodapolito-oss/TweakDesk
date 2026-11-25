@@ -675,10 +675,20 @@ impl InstallPanel {
                                 continue;
                             }
                             let mut on = self.catalog_sel.contains(&i);
-                            if ui
-                                .checkbox(&mut on, format!("{}  ({})", e.name, e.winget_id))
-                                .changed()
-                            {
+                            // Il testo del checkbox non va a capo da solo: con nomi e id lunghi
+                            // uscirebbe a destra dalla finestra. Lo tronco in un'etichetta a parte.
+                            let changed = ui
+                                .horizontal(|ui| {
+                                    let cb = ui.checkbox(&mut on, "");
+                                    ui.add(
+                                        egui::Label::new(format!("{}  ({})", e.name, e.winget_id))
+                                            .truncate(),
+                                    );
+                                    cb
+                                })
+                                .inner
+                                .changed();
+                            if changed {
                                 if on {
                                     self.catalog_sel.insert(i);
                                 } else {
