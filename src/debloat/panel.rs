@@ -511,7 +511,8 @@ impl DebloatPanel {
     ) {
         ui.label(label);
         ui.horizontal(|ui| {
-            ui.add(egui::TextEdit::singleline(value).desired_width(480.0));
+            let width = theme::path_field_width(ui.available_width());
+            ui.add(egui::TextEdit::singleline(value).desired_width(width));
             if ui.button("Scegli…").clicked() {
                 if let Some(p) = pick() {
                     *value = p.to_string_lossy().to_string();

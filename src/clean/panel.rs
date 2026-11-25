@@ -571,7 +571,8 @@ impl CleanPanel {
                 ui.end_row();
                 ui.label("File di destinazione:");
                 ui.horizontal(|ui| {
-                    ui.add(egui::TextEdit::singleline(&mut self.bk_image).desired_width(430.0));
+                    let width = theme::path_field_width(ui.available_width());
+                    ui.add(egui::TextEdit::singleline(&mut self.bk_image).desired_width(width));
                     if ui.button("Scegli…").clicked() {
                         if let Some(p) = rfd::FileDialog::new()
                             .add_filter("Immagine WIM", &["wim"])

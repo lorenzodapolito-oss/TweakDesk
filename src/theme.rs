@@ -111,6 +111,13 @@ fn harmonize(v: &mut egui::Visuals) {
     }
 }
 
+/// Larghezza di un campo di testo (percorso file/cartella) affiancato da un pulsante
+/// «Scegli…»: lascia sempre spazio al pulsante, così in una finestra stretta il campo
+/// si restringe invece di essere tagliato a destra (fuori dall'area visibile/scorrevole).
+pub fn path_field_width(available: f32) -> f32 {
+    (available - 100.0).max(80.0)
+}
+
 /// Le righe del registro, una per riga, come le vede chi le copia.
 pub fn log_text(log: &[(Color32, String)]) -> String {
     log.iter()
@@ -188,6 +195,18 @@ pub fn apply(ctx: &egui::Context) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn path_field_width_shrinks_but_never_disappears() {
+        assert_eq!(path_field_width(800.0), 700.0);
+        assert_eq!(path_field_width(120.0), 80.0, "non scende sotto il minimo");
+        assert_eq!(path_field_width(0.0), 80.0);
+        assert_eq!(
+            path_field_width(-50.0),
+            80.0,
+            "finestra assurda: niente panico"
+        );
+    }
 
     #[test]
     fn log_text_joins_lines_in_order_without_colors() {
