@@ -523,7 +523,9 @@ impl DebloatPanel {
     }
 
     fn installed_tab(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
-        ui.horizontal(|ui| {
+        // A capo invece di tagliato: in finestra stretta i due pulsanti più l'avviso
+        // non ci stanno su una riga sola.
+        ui.horizontal_wrapped(|ui| {
             let n = Self::chosen(&self.inst, false).len();
             if Self::big_button(
                 ui,
@@ -633,7 +635,9 @@ impl DebloatPanel {
                 ui.label(RichText::new("oscdimg.exe non trovato: scarica e installa il Windows ADK (solo «Deployment Tools») con il pulsante, oppure indica il file.").color(theme::WARN));
             }
             if self.output == Output::Iso {
-                ui.horizontal(|ui| {
+                // A capo invece di tagliata: i due pulsanti e l'avviso non ci stanno
+                // sempre su una riga sola.
+                ui.horizontal_wrapped(|ui| {
                     let can = !self.busy && self.is_admin;
                     if ui
                         .add_enabled(can, egui::Button::new(RichText::new("Scarica e installa ADK (Deployment Tools)").strong()).fill(theme::DOWNLOAD))
@@ -660,7 +664,9 @@ impl DebloatPanel {
                             rfd::FileDialog::new().add_filter("zip", &["zip"]).pick_file()
                         });
                     });
-                    ui.horizontal(|ui| {
+                    // A capo invece di tagliata: cinque pulsanti non ci stanno su una riga sola
+                    // in finestra stretta.
+                    ui.horizontal_wrapped(|ui| {
                         if ui
                             .add_enabled(!self.busy && self.is_admin, egui::Button::new(RichText::new("Crea la ISO con UUP dump").strong()).fill(theme::DOWNLOAD))
                             .clicked()
@@ -685,7 +691,7 @@ impl DebloatPanel {
                 .default_open(false)
                 .show(ui, |ui| {
                     ui.label(RichText::new("Vengono integrati in ogni edizione prima delle voci scelte. Se un aggiornamento fallisce, la creazione si ferma.").color(theme::MUTED));
-                    ui.horizontal(|ui| {
+                    ui.horizontal_wrapped(|ui| {
                         if ui.button("Aggiungi file…").clicked() {
                             if let Some(files) = rfd::FileDialog::new().add_filter("Aggiornamenti", &["msu", "cab"]).pick_files() {
                                 for f in files {
@@ -702,7 +708,8 @@ impl DebloatPanel {
                     });
                     let mut remove = None;
                     for (i, u) in self.updates.iter().enumerate() {
-                        ui.horizontal(|ui| {
+                        // Il percorso del file può essere lungo: a capo invece di tagliato.
+                        ui.horizontal_wrapped(|ui| {
                             if ui.small_button("Togli").clicked() {
                                 remove = Some(i);
                             }
@@ -714,7 +721,7 @@ impl DebloatPanel {
                     }
                 });
             ui.add_space(6.0);
-            ui.horizontal(|ui| {
+            ui.horizontal_wrapped(|ui| {
                 if ui.add_enabled(!self.busy, egui::Button::new("Leggi le edizioni della ISO")).clicked() {
                     self.read_editions(ctx);
                 }

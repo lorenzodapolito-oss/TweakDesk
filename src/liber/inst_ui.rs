@@ -504,7 +504,11 @@ impl InstApp {
         }
         for (c, n) in &mains {
             let sel = self.cat.as_deref() == Some(c.as_str());
-            if ui.selectable_label(sel, format!("{c} ({n})")).clicked() {
+            // Troncato: un nome di categoria lungo non deve uscire dal pannello laterale.
+            if ui
+                .add(egui::Button::selectable(sel, format!("{c} ({n})")).truncate())
+                .clicked()
+            {
                 self.cat = Some(c.clone());
             }
         }

@@ -722,7 +722,9 @@ impl InstallPanel {
         if programs {
             egui::Panel::top("top").show(ui, |ui| {
                 ui.add_space(6.0);
-                ui.horizontal(|ui| {
+                // A capo invece di tagliata: un percorso lungo non deve spingere
+                // i pulsanti fuori dalla finestra.
+                ui.horizontal_wrapped(|ui| {
                     ui.label("Cartella predefinita:");
                     ui.label(RichText::new(self.root().display().to_string()).strong());
                     if ui.button("Cambia…").clicked() {

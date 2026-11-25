@@ -691,7 +691,11 @@ impl LiberPanel {
         }
         for (c, n) in &mains {
             let sel = self.cat.as_deref() == Some(c.as_str());
-            if ui.selectable_label(sel, format!("{c} ({n})")).clicked() {
+            // Troncato: un nome di categoria lungo non deve uscire dal pannello laterale.
+            if ui
+                .add(egui::Button::selectable(sel, format!("{c} ({n})")).truncate())
+                .clicked()
+            {
                 self.cat = Some(c.clone());
             }
         }
@@ -1004,21 +1008,7 @@ impl LiberPanel {
             ui.add_space(4.0);
         });
         egui::Panel::bottom("liber_log").show(ui, |ui| {
-            egui::Frame::new()
-                .fill(theme::LOG_BG)
-                .inner_margin(6.0)
-                .show(ui, |ui| {
-                    egui::ScrollArea::vertical()
-                        .max_height(110.0)
-                        .auto_shrink([false, true])
-                        .stick_to_bottom(true)
-                        .show(ui, |ui| {
-                            ui.set_width(ui.available_width());
-                            for (c, m) in &self.log {
-                                ui.label(RichText::new(m).color(*c).monospace());
-                            }
-                        });
-                });
+            theme::log_view(ui, &self.log, 110.0);
         });
         egui::Panel::left("liber_cats")
             .default_size(170.0)

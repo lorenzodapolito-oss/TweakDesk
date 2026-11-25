@@ -607,7 +607,8 @@ impl TweakPanel {
                 }
             });
             if needs_admin && !self.is_admin {
-                ui.horizontal(|ui| {
+                // A capo invece di tagliato: il pulsante non deve uscire dalla finestra.
+                ui.horizontal_wrapped(|ui| {
                     ui.label(
                         RichText::new(
                             "Alcune voci selezionate richiedono i privilegi di amministratore.",
