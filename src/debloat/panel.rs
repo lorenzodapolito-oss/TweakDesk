@@ -86,7 +86,6 @@ pub struct DebloatPanel {
     delete_files: bool,
     compact_registry: bool,
     delete_work: bool,
-    bypass_oobe: bool,
     use_unattend: bool,
     un: unattend::Options,
 }
@@ -137,7 +136,6 @@ impl DebloatPanel {
             delete_files: true,
             compact_registry: false,
             delete_work: true,
-            bypass_oobe: true,
             use_unattend: true,
             un: unattend::Options::default(),
         }
@@ -407,7 +405,6 @@ impl DebloatPanel {
             method: self.method,
             oscdimg: PathBuf::from(self.oscdimg.trim()),
             delete_work: self.delete_work,
-            bypass_oobe: self.bypass_oobe,
         }
     }
 
@@ -767,16 +764,14 @@ impl DebloatPanel {
                     }
                     ui.checkbox(&mut self.compact_registry, "Compatta i file di registro (guadagno piccolo)");
                     ui.checkbox(&mut self.delete_work, "Cancella la cartella di lavoro alla fine");
-                    ui.checkbox(
-                        &mut self.bypass_oobe,
-                        "All'avvio salta la richiesta di account Microsoft: vai subito alla creazione dell'account locale",
-                    );
                 });
-            if self.output == Output::Iso {
             egui::CollapsingHeader::new(RichText::new("Installazione automatica (file di risposte)").strong().size(16.0))
                 .default_open(true)
                 .show(ui, |ui| {
-                    ui.checkbox(&mut self.use_unattend, "Aggiungi autounattend.xml alla ISO");
+                    ui.checkbox(
+                        &mut self.use_unattend,
+                        "Crea l'account locale in automatico: salta la richiesta di account Microsoft",
+                    );
                     if self.use_unattend {
                         ui.checkbox(&mut self.un.local_account, "Account locale: salta l'account Microsoft e la connessione a internet");
                         ui.add_enabled_ui(self.un.local_account, |ui| {
@@ -799,14 +794,18 @@ impl DebloatPanel {
                             ui.label("Fuso orario:");
                             ui.add(egui::TextEdit::singleline(&mut self.un.timezone).desired_width(200.0));
                         });
-                        ui.checkbox(&mut self.un.bypass_checks, "Salta i controlli di installazione (anche nel file di risposte)");
+                        if self.output == Output::Iso {
+                            ui.checkbox(&mut self.un.bypass_checks, "Salta i controlli di installazione (TPM, Secure Boot, RAM, CPU)");
+                        }
                         ui.checkbox(&mut self.un.skip_screens, "Salta le schermate iniziali (licenza, privacy, rete)");
                         ui.checkbox(&mut self.un.prevent_encryption, "Niente cifratura automatica del disco");
                         ui.checkbox(&mut self.un.compact_os, "Compact OS dopo la prima installazione (risparmia circa 2 GB)");
-                        ui.label(RichText::new("La password resta scritta in chiaro dentro la ISO.").small().color(theme::WARN));
+                        if self.output == Output::Wim {
+                            ui.label(RichText::new("Scritto dentro l'immagine (Windows\\Panther\\unattend.xml): vale anche installando solo da install.wim, senza una ISO avviabile.").small().color(theme::MUTED));
+                        }
+                        ui.label(RichText::new("La password resta scritta in chiaro nel file creato.").small().color(theme::WARN));
                     }
                 });
-            }
             ui.add_space(6.0);
             ui.label(RichText::new("Voci da applicare a ogni edizione").strong().size(16.0));
             Self::items_ui(ui, true, &mut self.iso_items);
