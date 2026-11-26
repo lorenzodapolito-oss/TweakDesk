@@ -218,11 +218,15 @@ impl DebloatPanel {
             // Il file «Annulla» si riscrive a ogni modifica, prima di farla: anche se il
             // programma si chiude a metà, si può tornare indietro.
             let mut save_err: Option<String> = None;
+            // Tutte le righe del log, per salvarle su file alla fine: così resta un resoconto
+            // di cosa è stato applicato anche dopo aver chiuso il programma.
+            let mut log_lines: Vec<(Kind, String)> = Vec::new();
             let (rep, undo) = apply::apply_full(
                 &items,
                 &target,
                 &RealSys,
                 &mut |k, m| {
+                    log_lines.push((k, m.to_string()));
                     let _ = t2.send(Event::Log(k, m.to_string()));
                 },
                 &mut |n, t| {
@@ -242,17 +246,31 @@ impl DebloatPanel {
                 ),
                 (None, true) => String::new(),
             };
-            let _ = tx.send(Event::Log(
-                Kind::Ok,
-                format!(
-                    "Finito: {} fatte, {} senza effetto, {} fallite. {msg}",
-                    rep.done, rep.skipped, rep.failed
-                ),
-            ));
+            let finito = format!(
+                "Finito: {} fatte, {} senza effetto, {} fallite. {msg}",
+                rep.done, rep.skipped, rep.failed
+            );
+            log_lines.push((Kind::Ok, finito.clone()));
+            let _ = tx.send(Event::Log(Kind::Ok, finito));
             let f = apply::followup(&items);
             if let Some(m) = f.message() {
+                log_lines.push((Kind::Info, m.to_string()));
                 let _ = tx.send(Event::Log(Kind::Info, m.to_string()));
                 let _ = tx.send(Event::Followup(f));
+            }
+            let log_file = app_dir()
+                .join("BackupDebloat")
+                .join(format!("log-{stamp}.txt"));
+            match apply::save_log(&log_file, &log_lines) {
+                Ok(()) => {
+                    let _ = tx.send(Event::Log(
+                        Kind::Info,
+                        format!("Registro salvato in {}", log_file.display()),
+                    ));
+                }
+                Err(e) => {
+                    let _ = tx.send(Event::Log(Kind::Warn, format!("Registro non salvato: {e}")));
+                }
             }
         });
     }
@@ -419,11 +437,29 @@ impl DebloatPanel {
         );
         self.spawn(ctx, move |tx| {
             let t2 = tx.clone();
+            let mut log_lines: Vec<(Kind, String)> = Vec::new();
             let r = iso::build(&RealSys, &plan, &mut |k, m| {
+                log_lines.push((k, m.to_string()));
                 let _ = t2.send(Event::Log(k, m.to_string()));
             });
-            if let Err(e) = r {
-                let _ = tx.send(Event::Log(Kind::Err, format!("ISO non creata: {e}")));
+            if let Err(e) = &r {
+                let msg = format!("ISO non creata: {e}");
+                log_lines.push((Kind::Err, msg.clone()));
+                let _ = tx.send(Event::Log(Kind::Err, msg));
+            }
+            // Resoconto completo salvato accanto al file creato, così resta una lista precisa
+            // di cosa è stato tolto/modificato anche dopo aver chiuso TweakDesk.
+            let log_file = PathBuf::from(format!("{}.log.txt", plan.iso_out.display()));
+            match apply::save_log(&log_file, &log_lines) {
+                Ok(()) => {
+                    let _ = tx.send(Event::Log(
+                        Kind::Info,
+                        format!("Registro salvato in {}", log_file.display()),
+                    ));
+                }
+                Err(e) => {
+                    let _ = tx.send(Event::Log(Kind::Warn, format!("Registro non salvato: {e}")));
+                }
             }
         });
     }

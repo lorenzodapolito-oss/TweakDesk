@@ -536,6 +536,37 @@ pub fn load_undo(file: &Path) -> Result<Vec<Undo>, String> {
     serde_json::from_str(&text).map_err(|e| format!("{}: {e}", file.display()))
 }
 
+fn kind_label(k: Kind) -> &'static str {
+    match k {
+        Kind::Info => "INFO",
+        Kind::Ok => "OK",
+        Kind::Warn => "ATTENZIONE",
+        Kind::Err => "ERRORE",
+    }
+}
+
+/// Il log come testo semplice, una riga per voce (`[OK] messaggio`): usato per salvarlo su
+/// file dopo un'applicazione o la creazione di una ISO/install.wim, così resta anche dopo
+/// aver chiuso il programma.
+pub fn report_text(lines: &[(Kind, String)]) -> String {
+    lines
+        .iter()
+        .map(|(k, m)| format!("[{}] {m}", kind_label(*k)))
+        .collect::<Vec<_>>()
+        .join("\r\n")
+}
+
+/// Salva il log su file (crea la cartella se non esiste, sovrascrive un log precedente con lo
+/// stesso nome).
+pub fn save_log(file: &Path, lines: &[(Kind, String)]) -> Result<(), String> {
+    if let Some(dir) = file.parent() {
+        if !dir.as_os_str().is_empty() {
+            std::fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+        }
+    }
+    std::fs::write(file, report_text(lines)).map_err(|e| format!("{}: {e}", file.display()))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -551,6 +582,31 @@ mod tests {
     }
     fn noop() -> impl FnMut(Kind, &str) {
         |_, _| {}
+    }
+
+    #[test]
+    fn report_text_has_one_labelled_line_per_entry() {
+        let v = vec![
+            (Kind::Info, "inizio".to_string()),
+            (Kind::Ok, "fatto".to_string()),
+            (Kind::Warn, "fatto in parte".to_string()),
+            (Kind::Err, "fallito".to_string()),
+        ];
+        assert_eq!(
+            report_text(&v),
+            "[INFO] inizio\r\n[OK] fatto\r\n[ATTENZIONE] fatto in parte\r\n[ERRORE] fallito"
+        );
+    }
+
+    #[test]
+    fn save_log_writes_the_file_creating_the_folder() {
+        let d = std::env::temp_dir().join(format!("tdlog_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        let file = d.join("sub").join("log.txt");
+        save_log(&file, &[(Kind::Ok, "voce applicata".into())]).unwrap();
+        let text = std::fs::read_to_string(&file).unwrap();
+        assert!(text.contains("[OK] voce applicata"), "{text}");
+        let _ = std::fs::remove_dir_all(&d);
     }
 
     #[test]
