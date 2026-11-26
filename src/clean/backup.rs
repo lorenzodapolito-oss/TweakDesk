@@ -1,6 +1,7 @@
 //! Backup dell'intero sistema in un file `install.wim` (come «Backup di sistema» di Dism++):
 //! copia ombra (VSS) del disco + `dism /Capture-Image`, così anche i file in uso vengono copiati in modo coerente.
 
+use crate::clean::engine::human;
 use crate::clean::sys::Sys;
 use regex::Regex;
 use std::path::{Path, PathBuf};
@@ -121,6 +122,62 @@ fn create_shadow(sys: &dyn Sys, drive: &str) -> Result<(String, String), String>
     parse_shadow(&out).ok_or_else(|| format!("Copia ombra non riconosciuta: {}", out.trim()))
 }
 
+/// Lettera dell'unità all'inizio di un percorso tipo `D:\Backup\install.wim` (se c'è).
+fn drive_of(p: &Path) -> Option<String> {
+    let s = p.to_string_lossy();
+    let b = s.as_bytes();
+    if b.len() >= 2 && b[1] == b':' && b[0].is_ascii_alphabetic() {
+        Some(s[0..2].to_string())
+    } else {
+        None
+    }
+}
+
+/// Legge `Size` e `FreeSpace` (in byte) dall'output di `Get-CimInstance Win32_LogicalDisk | Format-List`.
+fn parse_disk_info(out: &str) -> Option<(u64, u64)> {
+    let num = |field: &str| -> Option<u64> {
+        let re = Regex::new(&format!(r"(?m)^{field}\s*:\s*(\d+)")).ok()?;
+        re.captures(out)?.get(1)?.as_str().parse().ok()
+    };
+    Some((num("Size")?, num("FreeSpace")?))
+}
+
+fn disk_info(sys: &dyn Sys, drive: &str) -> Result<(u64, u64), String> {
+    let script = format!(
+        "Get-CimInstance Win32_LogicalDisk -Filter \"DeviceID='{drive}'\" | Select-Object Size,FreeSpace | Format-List"
+    );
+    let out = sys.run("powershell", &["-NoProfile", "-Command", &script])?;
+    parse_disk_info(&out).ok_or_else(|| format!("spazio disco non rilevato per {drive}"))
+}
+
+/// Controlla che il disco di destinazione abbia abbastanza spazio libero, prima di avviare un
+/// backup che può durare ore. Stima prudente: la compressione di DISM riduce tipicamente il
+/// sistema a circa la metà. Se non riusciamo a leggere lo spazio (percorso non su un'unità
+/// Windows, WMI non disponibile...) non blocchiamo nulla: meglio un controllo mancato che un
+/// falso allarme che impedisce un backup altrimenti valido.
+fn check_space(sys: &dyn Sys, plan: &Plan) -> Result<(), String> {
+    let Some(dest_drive) = drive_of(&plan.image) else {
+        return Ok(());
+    };
+    let Ok((size, source_free)) = disk_info(sys, &plan.drive) else {
+        return Ok(());
+    };
+    let Ok((_, dest_free)) = disk_info(sys, &dest_drive) else {
+        return Ok(());
+    };
+    let used = size.saturating_sub(source_free);
+    let needed = used / 2;
+    if dest_free < needed {
+        return Err(format!(
+            "Spazio insufficiente su {dest_drive}: liberi {}, probabilmente ne servono almeno {} (stima: metà dello spazio usato su {}).",
+            human(dest_free),
+            human(needed),
+            plan.drive
+        ));
+    }
+    Ok(())
+}
+
 fn delete_shadow(sys: &dyn Sys, id: &str) -> Result<(), String> {
     // L'ID è già stato validato come GUID da parse_shadow.
     let script = format!(
@@ -143,6 +200,7 @@ pub fn run(
             "Servono i permessi di amministratore (riavvia TweakDesk come amministratore)".into(),
         );
     }
+    check_space(sys, plan)?;
     std::fs::create_dir_all(work_dir).map_err(|e| format!("{}: {e}", work_dir.display()))?;
     let ini = work_dir.join("backup-esclusioni.ini");
     std::fs::write(&ini, config_ini(plan)).map_err(|e| format!("{}: {e}", ini.display()))?;
@@ -311,6 +369,66 @@ mod tests {
         let c = sys.commands.borrow().clone();
         assert!(c.iter().any(|x| x.contains("Remove-CimInstance")));
         assert!(c.iter().any(|x| x.contains("rmdir")));
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn disk_info_parses_size_and_free_space() {
+        let out = "\r\nSize       : 1000000000000\r\nFreeSpace  : 900000000000\r\n\r\n";
+        assert_eq!(
+            parse_disk_info(out),
+            Some((1_000_000_000_000, 900_000_000_000))
+        );
+        assert_eq!(parse_disk_info("niente qui"), None);
+    }
+
+    #[test]
+    fn check_space_blocks_when_destination_is_too_full() {
+        let sys = FakeSys::default();
+        sys.responses.borrow_mut().push((
+            "DeviceID='C:'".into(),
+            "Size : 1000000000000\r\nFreeSpace : 900000000000\r\n".into(),
+        ));
+        sys.responses.borrow_mut().push((
+            "DeviceID='D:'".into(),
+            "Size : 2000000000000\r\nFreeSpace : 10000000000\r\n".into(),
+        ));
+        let p = Plan {
+            drive: "C:".into(),
+            image: PathBuf::from("D:\\Backup\\install.wim"),
+            name: "x".into(),
+            compression: Compression::Max,
+        };
+        let err = check_space(&sys, &p).unwrap_err();
+        assert!(err.contains("Spazio insufficiente"), "{err}");
+    }
+
+    #[test]
+    fn check_space_allows_when_enough_room() {
+        let sys = FakeSys::default();
+        sys.responses.borrow_mut().push((
+            "DeviceID='C:'".into(),
+            "Size : 1000000000000\r\nFreeSpace : 900000000000\r\n".into(),
+        ));
+        sys.responses.borrow_mut().push((
+            "DeviceID='D:'".into(),
+            "Size : 2000000000000\r\nFreeSpace : 900000000000\r\n".into(),
+        ));
+        let p = Plan {
+            drive: "C:".into(),
+            image: PathBuf::from("D:\\Backup\\install.wim"),
+            name: "x".into(),
+            compression: Compression::Max,
+        };
+        assert!(check_space(&sys, &p).is_ok());
+    }
+
+    #[test]
+    fn check_space_skips_silently_when_info_is_unavailable() {
+        // Percorso senza lettera di unità (come nei test su Linux) o WMI muto: nessun blocco.
+        let d = tmp("space_unknown");
+        let sys = FakeSys::default();
+        assert!(check_space(&sys, &plan(&d)).is_ok());
         let _ = std::fs::remove_dir_all(&d);
     }
 

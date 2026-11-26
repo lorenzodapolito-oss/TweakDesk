@@ -34,6 +34,7 @@ pub struct CleanPanel {
     sizes: HashMap<&'static str, Stats>,
     startup: Vec<Entry>,
     startup_loaded: bool,
+    startup_filter: String,
     show_system: bool,
     log: Vec<(Color32, String)>,
     busy: bool,
@@ -67,6 +68,7 @@ impl CleanPanel {
             sizes: HashMap::new(),
             startup: Vec::new(),
             startup_loaded: false,
+            startup_filter: String::new(),
             show_system: false,
             log: Vec::new(),
             busy: false,
@@ -488,6 +490,18 @@ impl CleanPanel {
             }
             ui.checkbox(&mut self.show_system, "Mostra anche le voci di Windows");
         });
+        ui.horizontal_wrapped(|ui| {
+            ui.label("Cerca:");
+            let width = theme::field_width(ui.available_width(), 40.0);
+            ui.add(
+                egui::TextEdit::singleline(&mut self.startup_filter)
+                    .desired_width(width)
+                    .hint_text("nome o comando…"),
+            );
+            if !self.startup_filter.is_empty() && ui.button("✕").clicked() {
+                self.startup_filter.clear();
+            }
+        });
         ui.label(
             RichText::new("Togli la spunta per impedire a un programma di partire con Windows (si può riattivare in qualsiasi momento). «Elimina» lo rimuove, salvando una copia.")
                 .color(theme::MUTED),
@@ -495,6 +509,7 @@ impl CleanPanel {
         ui.add_space(4.0);
         let mut toggle: Option<(usize, bool)> = None;
         let mut delete: Option<usize> = None;
+        let mut shown = 0usize;
         egui::ScrollArea::both()
             .auto_shrink([false, false])
             .show(ui, |ui| {
@@ -511,6 +526,10 @@ impl CleanPanel {
                             if e.system && !self.show_system {
                                 continue;
                             }
+                            if !startup::matches_filter(e, &self.startup_filter) {
+                                continue;
+                            }
+                            shown += 1;
                             let mut on = e.enabled;
                             if ui.checkbox(&mut on, "").changed() {
                                 toggle = Some((i, on));
@@ -529,11 +548,13 @@ impl CleanPanel {
                             ui.end_row();
                         }
                     });
-                if self.startup.is_empty() && self.startup_loaded && !self.busy {
-                    ui.label(
-                        RichText::new("Nessuna voce trovata (o non sei su Windows).")
-                            .color(theme::MUTED),
-                    );
+                if shown == 0 && self.startup_loaded && !self.busy {
+                    let msg = if self.startup.is_empty() {
+                        "Nessuna voce trovata (o non sei su Windows)."
+                    } else {
+                        "Nessuna voce corrisponde alla ricerca."
+                    };
+                    ui.label(RichText::new(msg).color(theme::MUTED));
                 }
             });
         if let Some((i, on)) = toggle {

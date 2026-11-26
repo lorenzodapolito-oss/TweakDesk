@@ -175,6 +175,16 @@ pub fn parse_tasks(xml: &str) -> Vec<Entry> {
     out
 }
 
+/// Vero se il filtro (senza distinguere maiuscole/minuscole) compare nel nome o nel comando.
+/// Un filtro vuoto o con soli spazi corrisponde a tutte le voci.
+pub fn matches_filter(e: &Entry, filter: &str) -> bool {
+    let f = filter.trim().to_lowercase();
+    if f.is_empty() {
+        return true;
+    }
+    e.name.to_lowercase().contains(&f) || e.command.to_lowercase().contains(&f)
+}
+
 /// Tutte le voci di avvio.
 pub fn list(sys: &dyn Sys, env: &dyn Env) -> Vec<Entry> {
     let mut out = Vec::new();
@@ -344,6 +354,30 @@ mod tests {
 <Task version="1.2"><RegistrationInfo><URI>\Giornaliera</URI></RegistrationInfo>
 <Triggers><CalendarTrigger/></Triggers><Settings><Enabled>true</Enabled></Settings>
 <Actions><Exec><Command>a.exe</Command></Exec></Actions></Task>"#;
+
+    fn entry(name: &str, command: &str) -> Entry {
+        Entry {
+            name: name.into(),
+            command: command.into(),
+            source: Source::Registry,
+            origin: String::new(),
+            enabled: true,
+            location: String::new(),
+            approved_key: String::new(),
+            system: false,
+            needs_admin: false,
+        }
+    }
+
+    #[test]
+    fn filter_matches_name_or_command_case_insensitively() {
+        let e = entry("Spotify", "C:\\Program Files\\Spotify\\Spotify.exe");
+        assert!(matches_filter(&e, ""));
+        assert!(matches_filter(&e, "   "));
+        assert!(matches_filter(&e, "SPOT"));
+        assert!(matches_filter(&e, "program files"));
+        assert!(!matches_filter(&e, "discord"));
+    }
 
     #[test]
     fn enabled_flag_from_hex() {
