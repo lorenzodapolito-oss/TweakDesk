@@ -118,12 +118,11 @@ impl DebloatPanel {
             confirm: false,
             followup: None,
             iso_in: String::new(),
-            iso_out: base
-                .join("Windows11-TweakDesk.iso")
-                .to_string_lossy()
-                .to_string(),
+            // Preimpostato su install.wim (niente ISO avviabile): più veloce da creare e
+            // basta a chi vuole solo un'immagine da applicare con DISM o Dism++.
+            iso_out: base.join("install.wim").to_string_lossy().to_string(),
             work: base.to_string_lossy().to_string(),
-            output: Output::Iso,
+            output: Output::Wim,
             oscdimg,
             method: IsoMethod::Imapi,
             editions: Vec::new(),
@@ -890,6 +889,13 @@ impl DebloatPanel {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn new_panel_defaults_to_install_wim_without_a_boot_iso() {
+        let p = DebloatPanel::new();
+        assert_eq!(p.output, Output::Wim);
+        assert!(p.iso_out.ends_with("install.wim"), "{}", p.iso_out);
+    }
 
     #[test]
     fn swap_ext_keeps_folder_and_stem() {
