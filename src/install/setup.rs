@@ -100,7 +100,7 @@ pub const SCRIPTS: &[Script] = &[
     Script {
         group: "Cartelle utente",
         label: "Sposta cartelle su un altro disco",
-        desc: "Sposta Desktop, Documenti, Immagini, Musica, Video e Download sul disco che scegli (di solito D:) e cambia le cartelle di Windows. I duplicati su C: vengono eliminati.",
+        desc: "Mette dentro Documenti tutte le altre cartelle sciolte nel profilo (Desktop, Immagini, Musica, Video, Download e quelle create a mano), poi sposta Documenti con tutto il contenuto sul disco che scegli (di solito D:) e aggiorna le cartelle di Windows. AppData e OneDrive non vengono mai toccate; i duplicati su C: vengono eliminati.",
         file: "SpostaCartelleUtente.bat",
         kind: Kind::Bat,
         impact: Impact::High,
@@ -679,5 +679,19 @@ mod tests {
         assert!(t.contains("DoNotExpandEnvironmentNames"));
         // Se lo spostamento fallisce non si cambia il registro e non si cancella nulla.
         assert!(t.contains("$rc -ge 8") && t.contains("robocopy"));
+    }
+
+    #[test]
+    fn move_folders_script_first_gathers_loose_profile_folders_into_documents() {
+        let t = script_text("SpostaCartelleUtente.bat");
+        // Mai AppData o OneDrive, mai le cartelle di compatibilita' (junction/reparse point).
+        assert!(t.contains("'AppData'"));
+        assert!(t.contains("'OneDrive'"));
+        assert!(t.contains("ReparsePoint"));
+        // Enumera tutto quello che sta sciolto nel profilo, non solo le cartelle speciali note.
+        assert!(t.contains("Get-ChildItem -LiteralPath $env:USERPROFILE -Directory"));
+        // Le cartelle sciolte finiscono dentro Documenti prima che Documenti stessa si sposti.
+        assert!(t.contains("Join-Path $docs"));
+        assert!(t.contains("Join-Path ($root + '\\') 'Documenti'"));
     }
 }
