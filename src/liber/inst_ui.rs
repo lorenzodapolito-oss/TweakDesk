@@ -595,7 +595,9 @@ impl InstApp {
                                         if matches!(r.status, IStatus::Error(_)) {
                                             resp.on_hover_text(t);
                                         }
-                                        ui.horizontal(|ui| {
+                                        // A capo invece di tagliati: con la tessera stretta (tante
+                                        // colonne, o finestra piccola) i pulsanti non ci stanno su una riga sola.
+                                        ui.horizontal_wrapped(|ui| {
                                             let b = egui::Button::new(RichText::new("Installa").strong().color(theme::ON_COLOR)).fill(theme::DOWNLOAD);
                                             if ui.add(b).clicked() {
                                                 install = Some(i);

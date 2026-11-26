@@ -786,7 +786,9 @@ impl LiberPanel {
                                 if let Status::Result(Check::Error(e)) = &r.status {
                                     resp.on_hover_text(e);
                                 }
-                                ui.horizontal(|ui| {
+                                // A capo invece di tagliati: con la tessera stretta (tante colonne,
+                                // o finestra piccola) fino a quattro pulsanti non ci stanno su una riga sola.
+                                ui.horizontal_wrapped(|ui| {
                                     let start = egui::Button::new(RichText::new("Avvia").strong().color(theme::ON_COLOR)).fill(theme::DOWNLOAD);
                                     if ui.add(start).clicked() {
                                         launch = Some(i);
