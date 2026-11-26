@@ -157,7 +157,12 @@ const PERS: &str = "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\
 
 pub const ITEMS: &[Item] = &[
     // ---------- App: Sicuro ----------
-    app!("xbox", Sicuro, "Xbox e Game Bar", "Microsoft.GamingApp"),
+    // Microsoft.XboxApp è la vecchia app "Xbox Console Companion": su alcune immagini
+    // convive con (o sostituisce) Microsoft.GamingApp, va tolta anche lei o resta attiva.
+    it("xbox", Apps, Sicuro, "Xbox e Game Bar", "", Both, &[
+        Appx("Microsoft.GamingApp"),
+        Appx("Microsoft.XboxApp"),
+    ]),
     it("xbox_ov", Apps, Sicuro, "Xbox: sovrapposizioni e servizi dell'app", "", Both, &[
         Appx("Microsoft.XboxGamingOverlay"),
         Appx("Microsoft.XboxGameOverlay"),
@@ -180,6 +185,12 @@ pub const ITEMS: &[Item] = &[
     app!("devhome", Sicuro, "Dev Home", "Microsoft.Windows.DevHome"),
     app!("linkedin", Sicuro, "LinkedIn", "7EE7776C.LinkedInforWindows"),
     app!("todo", Sicuro, "Microsoft To Do", "Microsoft.Todos"),
+    app!("onenote", Sicuro, "OneNote", "Microsoft.Office.OneNote"),
+    app!("skype", Sicuro, "Skype", "Microsoft.SkypeApp"),
+    app!("family", Sicuro, "Microsoft Family (Sicurezza famiglia)", "MicrosoftCorporationII.MicrosoftFamily"),
+    app!("viewer3d", Sicuro, "Visualizzatore 3D", "Microsoft.Microsoft3DViewer"),
+    app!("alarms", Sicuro, "Sveglie e orologio", "Microsoft.WindowsAlarms"),
+    app!("mailcal", Sicuro, "Posta e Calendario", "microsoft.windowscommunicationsapps"),
     it("promo", Apps, Sicuro, "App pubblicitarie (Spotify, Disney+, Prime Video, TikTok, Instagram)", "", Both, &[
         Appx("SpotifyAB.SpotifyMusic"),
         Appx("Disney.37853FC22B2CE"),
@@ -296,6 +307,9 @@ pub const ITEMS: &[Item] = &[
     ]),
     it("startdelay", Prestazioni, Sicuro, "Nessun ritardo di avvio dei programmi", "", Both, &[d("HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\Serialize", "StartupDelayInMSec", "0")]),
     it("power", Prestazioni, Sicuro, "Piano energetico «Prestazioni elevate»", "", OnlineOnly, &[Cmd("powercfg", &["/setactive", "SCHEME_MIN"])]),
+    it("reserved_storage", Prestazioni, Standard, "Riserva di spazio di Windows spenta (libera alcuni GB)", "Funziona solo sul sistema già installato: DISM non lo supporta su un'immagine offline.", OnlineOnly, &[
+        Cmd("dism", &["/Online", "/Set-ReservedStorageState", "/State:Disabled"]),
+    ]),
     it("gamemode", Prestazioni, Standard, "Modalità gioco attiva", "", Both, &[
         d("HKCU\\Software\\Microsoft\\GameBar", "AutoGameModeEnabled", "1"),
         d("HKCU\\Software\\Microsoft\\GameBar", "AllowAutoGameMode", "1"),
@@ -360,6 +374,9 @@ pub const ITEMS: &[Item] = &[
         RegDel { key: "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run", name: "OneDriveSetup" },
         Delete("System32\\OneDriveSetup.exe"),
         Delete("SysWOW64\\OneDriveSetup.exe"),
+        // Niente backup automatico delle cartelle (Desktop/Documenti/Immagini) su OneDrive,
+        // anche se qualcuno reinstalla OneDrive a mano in seguito.
+        d("HKLM\\SOFTWARE\\Policies\\Microsoft\\Windows\\OneDrive", "DisableFileSyncNGSC", "1"),
     ]),
     it("ie", Componenti, Standard, "Internet Explorer", "", Both, &[Capability("Browser.InternetExplorer"), Feature("Internet-Explorer-Optional-amd64")]),
     it("wmp", Componenti, Standard, "Windows Media Player (classico)", "", Both, &[Capability("Media.WindowsMediaPlayer"), Feature("WindowsMediaPlayer")]),
@@ -515,5 +532,58 @@ mod tests {
         assert!(!items_for(false).any(|i| i.id == "edge"));
         assert!(items_for(false).any(|i| i.id == "power"));
         assert!(!items_for(true).any(|i| i.id == "power"));
+    }
+
+    #[test]
+    fn xbox_also_removes_the_old_console_companion_app() {
+        let i = ITEMS.iter().find(|i| i.id == "xbox").unwrap();
+        let has = |p: &str| i.acts.iter().any(|a| matches!(a, Appx(x) if *x == p));
+        assert!(has("Microsoft.GamingApp"));
+        assert!(has("Microsoft.XboxApp"));
+    }
+
+    #[test]
+    fn new_app_removals_are_present_with_the_right_package_prefix() {
+        for (id, prefix) in [
+            ("onenote", "Microsoft.Office.OneNote"),
+            ("skype", "Microsoft.SkypeApp"),
+            ("family", "MicrosoftCorporationII.MicrosoftFamily"),
+            ("viewer3d", "Microsoft.Microsoft3DViewer"),
+            ("alarms", "Microsoft.WindowsAlarms"),
+            ("mailcal", "microsoft.windowscommunicationsapps"),
+        ] {
+            let i = ITEMS
+                .iter()
+                .find(|i| i.id == id)
+                .unwrap_or_else(|| panic!("{id}"));
+            assert!(
+                i.acts.iter().any(|a| matches!(a, Appx(p) if *p == prefix)),
+                "{id}"
+            );
+        }
+    }
+
+    #[test]
+    fn onedrive_also_disables_automatic_folder_backup() {
+        let i = ITEMS.iter().find(|i| i.id == "onedrive").unwrap();
+        let has = i.acts.iter().any(|a| {
+            matches!(a,
+                Reg { key, name, data, .. }
+                    if *key == "HKLM\\SOFTWARE\\Policies\\Microsoft\\Windows\\OneDrive"
+                        && *name == "DisableFileSyncNGSC"
+                        && *data == "1"
+            )
+        });
+        assert!(has);
+    }
+
+    #[test]
+    fn reserved_storage_is_online_only_and_uses_dism() {
+        let i = ITEMS.iter().find(|i| i.id == "reserved_storage").unwrap();
+        assert_eq!(i.scope as u8, Scope::OnlineOnly as u8);
+        assert!(i.acts.iter().any(|a| matches!(a,
+            Cmd(c, args) if *c == "dism" && args.contains(&"/Set-ReservedStorageState")
+        )));
+        assert!(!i.warn.is_empty());
     }
 }
