@@ -54,6 +54,18 @@ Servono i permessi di amministratore. Provare sempre prima in una macchina virtu
 - **Aggiornamenti nella ISO**: puoi aggiungere file `.msu`/`.cab` (dal Catalogo di Microsoft Update); vengono integrati in ogni edizione con DISM prima delle voci scelte.
 - **ISO da UUP dump**: indichi lo zip scaricato da uupdump.net, TweakDesk lo estrae in una cartella corta ed esegue lo script; la ISO prodotta diventa quella di partenza.
 - **Download di Windows senza errori di rete**: prima di avviare lo script di UUP dump, TweakDesk pulisce dal file hosts le righe che bloccano i server Microsoft (con copia `hosts.tweakdesk.bak`), controlla che il DNS risolva `tlu.dl.delivery.mp.microsoft.com` e limita a 6 i tentativi dello script (di suo ripete all'infinito). Pulsanti «Controlla la rete», «Imposta DNS pubblici» (1.1.1.1 / 8.8.8.8) e «DNS automatici».
+- **Registro su file**: sia «Applica» sul sistema in uso sia la creazione di ISO/install.wim salvano un resoconto leggibile su disco (`TweakDesk\BackupDebloat\log-AAAAMMGG-HHMMSS.txt` oppure `<file creato>.log.txt`), così resta una lista precisa di cosa è stato applicato/rimosso anche dopo aver chiuso il programma o installato l'immagine su un altro PC.
+- L'uscita della scheda «ISO di Windows 11» è preimpostata su **«Solo install.wim»**: chi vuole la ISO avviabile la seleziona a mano.
+
+## Verificare cosa è stato tolto dopo l'installazione
+
+`scripts/controlla-tweakdesk.ps1` controlla, su una copia di Windows già installata, lo stato delle voci del livello Estremo (Defender, SmartScreen, Edge, Hyper-V/Sandbox, WSL, SMB1/Telnet/TFTP/Work Folders/XPS, Fax, file di Windows Update, WinSxS) e stampa l'elenco di app e servizi ancora presenti. Si lancia con un comando unico da PowerShell aperto come amministratore:
+
+```
+powershell -ExecutionPolicy Bypass -File .\controlla-tweakdesk.ps1
+```
+
+Per salvare l'esito su file: aggiungere `| Tee-Object controllo-tweakdesk.txt` allo stesso comando.
 
 ## Scheda «Programmi» (2.3)
 
