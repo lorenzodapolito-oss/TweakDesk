@@ -20,7 +20,8 @@ use std::sync::mpsc::{channel, Receiver, Sender};
 
 enum Event {
     Log(Kind, String),
-    Progress(usize, usize),
+    /// Fatte, totali, etichetta della voce in corso (vuota quando è finito).
+    Progress(usize, usize, String),
     Editions(Result<Vec<Edition>, String>),
     Oscdimg(PathBuf),
     IsoIn(PathBuf),
@@ -62,8 +63,8 @@ pub struct DebloatPanel {
     iso_items: Checked,
     log: Vec<(Color32, String)>,
     busy: bool,
-    /// Avanzamento (fatte, totali) dell'applicazione delle voci.
-    progress: Option<(usize, usize)>,
+    /// Avanzamento (fatte, totali, voce in corso) dell'applicazione delle voci.
+    progress: Option<(usize, usize, String)>,
     tx: Sender<Event>,
     rx: Receiver<Event>,
     is_admin: bool,
@@ -175,7 +176,7 @@ impl DebloatPanel {
                 Event::IsoIn(p) => self.iso_in = p.to_string_lossy().to_string(),
                 Event::Oscdimg(p) => self.oscdimg = p.to_string_lossy().to_string(),
                 Event::Followup(f) => self.followup = Some(f),
-                Event::Progress(n, t) => self.progress = Some((n, t)),
+                Event::Progress(n, t, label) => self.progress = Some((n, t, label)),
                 Event::Finished => {
                     self.busy = false;
                     self.progress = None;
@@ -229,8 +230,8 @@ impl DebloatPanel {
                     log_lines.push((k, m.to_string()));
                     let _ = t2.send(Event::Log(k, m.to_string()));
                 },
-                &mut |n, t| {
-                    let _ = t3.send(Event::Progress(n, t));
+                &mut |n, t, label| {
+                    let _ = t3.send(Event::Progress(n, t, label.to_string()));
                 },
                 &mut |steps| {
                     if let Err(e) = apply::save_undo(steps, &file) {
@@ -252,6 +253,9 @@ impl DebloatPanel {
             );
             log_lines.push((Kind::Ok, finito.clone()));
             let _ = tx.send(Event::Log(Kind::Ok, finito));
+            let summary = apply::summary_text(&rep);
+            log_lines.push((Kind::Info, summary.clone()));
+            let _ = tx.send(Event::Log(Kind::Info, summary));
             let f = apply::followup(&items);
             if let Some(m) = f.message() {
                 log_lines.push((Kind::Info, m.to_string()));
@@ -870,14 +874,18 @@ impl DebloatPanel {
         self.log.extend(msgs);
         let ctx = ui.ctx().clone();
         if self.busy {
-            egui::Panel::top("debloat_top").show(ui, |ui| match self.progress {
-                Some((n, t)) if t > 0 => {
+            egui::Panel::top("debloat_top").show(ui, |ui| match &self.progress {
+                Some((n, t, label)) if *t > 0 => {
+                    let (n, t) = (*n, *t);
                     let frac = n as f32 / t as f32;
                     ui.add(
                         egui::ProgressBar::new(frac)
                             .fill(theme::DOWNLOAD)
                             .text(format!("{n} di {t} voci")),
                     );
+                    if !label.is_empty() {
+                        ui.label(RichText::new(format!("In corso: {label}")).color(theme::MUTED));
+                    }
                 }
                 _ => {
                     ui.horizontal(|ui| {

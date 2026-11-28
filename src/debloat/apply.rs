@@ -19,6 +19,12 @@ pub struct Report {
     pub done: usize,
     pub skipped: usize,
     pub failed: usize,
+    /// Etichetta di ogni voce applicata con successo (anche se "in parte", con avviso).
+    pub done_items: Vec<String>,
+    /// Etichetta di ogni voce saltata perché non c'era niente da fare.
+    pub skipped_items: Vec<String>,
+    /// Etichetta e motivo di ogni voce non riuscita.
+    pub failed_items: Vec<String>,
 }
 
 /// Come tornare indietro su una modifica di registro (solo sistema in uso).
@@ -393,16 +399,17 @@ pub fn apply(
     sys: &dyn Sys,
     log: &mut dyn FnMut(Kind, &str),
 ) -> (Report, Vec<Undo>) {
-    apply_with_progress(items, t, sys, log, &mut |_, _| {})
+    apply_with_progress(items, t, sys, log, &mut |_, _, _| {})
 }
 
-/// Come `apply`, e chiama `progress(fatte, totali)` prima di ogni voce e alla fine.
+/// Come `apply`, e chiama `progress(fatte, totali, voce_in_corso)` prima di ogni voce (con la
+/// sua etichetta) e alla fine (con etichetta vuota: non c'è più una voce "in corso").
 pub fn apply_with_progress(
     items: &[&Item],
     t: &Target,
     sys: &dyn Sys,
     log: &mut dyn FnMut(Kind, &str),
-    progress: &mut dyn FnMut(usize, usize),
+    progress: &mut dyn FnMut(usize, usize, &str),
 ) -> (Report, Vec<Undo>) {
     apply_full(items, t, sys, log, progress, &mut |_| {})
 }
@@ -414,7 +421,7 @@ pub fn apply_full(
     t: &Target,
     sys: &dyn Sys,
     log: &mut dyn FnMut(Kind, &str),
-    progress: &mut dyn FnMut(usize, usize),
+    progress: &mut dyn FnMut(usize, usize, &str),
     save: &mut dyn FnMut(&[Undo]),
 ) -> (Report, Vec<Undo>) {
     let mut rep = Report::default();
@@ -429,7 +436,7 @@ pub fn apply_full(
     }
     let total = items.len();
     for (n, item) in items.iter().enumerate() {
-        progress(n, total);
+        progress(n, total, item.label);
         let mut applied = false;
         let mut failed: Option<String> = None;
         for act in item.acts {
@@ -442,23 +449,28 @@ pub fn apply_full(
         match (applied, failed) {
             (false, Some(e)) => {
                 rep.failed += 1;
+                rep.failed_items.push(format!("{}: {e}", item.label));
                 log(Kind::Err, &format!("{}: {e}", item.label));
             }
             (true, Some(e)) => {
                 rep.done += 1;
+                rep.done_items
+                    .push(format!("{} (con avviso: {e})", item.label));
                 log(Kind::Warn, &format!("{}: fatto in parte ({e})", item.label));
             }
             (true, None) => {
                 rep.done += 1;
+                rep.done_items.push(item.label.to_string());
                 log(Kind::Ok, &format!("{}: fatto", item.label));
             }
             (false, None) => {
                 rep.skipped += 1;
+                rep.skipped_items.push(item.label.to_string());
                 log(Kind::Info, &format!("{}: niente da fare", item.label));
             }
         }
     }
-    progress(total, total);
+    progress(total, total, "");
     t.unload_hives(sys);
     (rep, undo.steps)
 }
@@ -554,6 +566,41 @@ pub fn report_text(lines: &[(Kind, String)]) -> String {
         .map(|(k, m)| format!("[{}] {m}", kind_label(*k)))
         .collect::<Vec<_>>()
         .join("\r\n")
+}
+
+/// Resoconto finale leggibile: elenco delle voci riuscite, poi quelle saltate, poi quelle
+/// fallite. Usato a fine applicazione (e a fine creazione ISO/install.wim) per mostrare subito
+/// cosa è andato a buon fine e cosa no, senza dover scorrere tutto il log.
+pub fn summary_text(rep: &Report) -> String {
+    let mut out = String::new();
+    out.push_str(&format!("Riuscite ({}):\r\n", rep.done_items.len()));
+    if rep.done_items.is_empty() {
+        out.push_str("  (nessuna)\r\n");
+    } else {
+        for i in &rep.done_items {
+            out.push_str(&format!("  - {i}\r\n"));
+        }
+    }
+    out.push_str(&format!(
+        "\r\nSaltate, niente da fare ({}):\r\n",
+        rep.skipped_items.len()
+    ));
+    if rep.skipped_items.is_empty() {
+        out.push_str("  (nessuna)\r\n");
+    } else {
+        for i in &rep.skipped_items {
+            out.push_str(&format!("  - {i}\r\n"));
+        }
+    }
+    out.push_str(&format!("\r\nFallite ({}):\r\n", rep.failed_items.len()));
+    if rep.failed_items.is_empty() {
+        out.push_str("  (nessuna)\r\n");
+    } else {
+        for i in &rep.failed_items {
+            out.push_str(&format!("  - {i}\r\n"));
+        }
+    }
+    out
 }
 
 /// Salva il log su file (crea la cartella se non esiste, sovrascrive un log precedente con lo
@@ -848,9 +895,63 @@ mod tests {
             &online(),
             &sys,
             &mut noop(),
-            &mut |n, t| seen.push((n, t)),
+            &mut |n, t, label| seen.push((n, t, label.to_string())),
         );
-        assert_eq!(seen, vec![(0, 2), (1, 2), (2, 2)]);
+        assert_eq!(
+            seen,
+            vec![
+                (0, 2, item("ad_id").label.to_string()),
+                (1, 2, item("ext").label.to_string()),
+                (2, 2, String::new()),
+            ]
+        );
+    }
+
+    #[test]
+    fn report_item_lists_match_the_counts() {
+        let sys = FakeSys::default();
+        let (rep, _) = apply_with_progress(
+            &[item("ad_id"), item("ext")],
+            &online(),
+            &sys,
+            &mut noop(),
+            &mut |_, _, _| {},
+        );
+        // Qualunque sia l'esito reale di ciascuna voce con FakeSys di default, ogni voce deve
+        // finire in esattamente una delle tre liste, e il conteggio di ciascuna lista deve
+        // corrispondere al contatore numerico gemello.
+        assert_eq!(rep.done_items.len(), rep.done);
+        assert_eq!(rep.skipped_items.len(), rep.skipped);
+        assert_eq!(rep.failed_items.len(), rep.failed);
+        assert_eq!(
+            rep.done_items.len() + rep.skipped_items.len() + rep.failed_items.len(),
+            2
+        );
+    }
+
+    #[test]
+    fn summary_text_lists_done_skipped_and_failed_with_counts() {
+        let rep = Report {
+            done: 1,
+            skipped: 1,
+            failed: 1,
+            done_items: vec!["A".to_string()],
+            skipped_items: vec!["B".to_string()],
+            failed_items: vec!["C: motivo".to_string()],
+        };
+        let t = summary_text(&rep);
+        assert!(t.contains("Riuscite (1)"));
+        assert!(t.contains("- A"));
+        assert!(t.contains("Saltate, niente da fare (1)"));
+        assert!(t.contains("- B"));
+        assert!(t.contains("Fallite (1)"));
+        assert!(t.contains("- C: motivo"));
+    }
+
+    #[test]
+    fn summary_text_says_none_for_empty_buckets() {
+        let t = summary_text(&Report::default());
+        assert_eq!(t.matches("(nessuna)").count(), 3);
     }
 
     fn reply(sys: &FakeSys, contains: &str, out: &str) {
@@ -879,7 +980,7 @@ mod tests {
             &online(),
             &sys,
             &mut noop(),
-            &mut |_, _| {},
+            &mut |_, _, _| {},
             &mut |steps| s2.set(steps.len()),
         );
         // Al momento di ogni «reg add» l'annullamento era già stato salvato.
