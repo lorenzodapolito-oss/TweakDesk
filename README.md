@@ -17,6 +17,7 @@ e le **applica su qualsiasi altro PC**, con copia di sicurezza e possibilità di
 - I gruppi **Aggiornamenti Windows** e **Sicurezza ridotta** sono deselezionati di default e chiedono conferma.
 - Un profilo può scrivere solo in `HKCU` e `HKLM`.
 - Le voci `HKLM` richiedono i privilegi di amministratore (pulsante «Riavvia come amministratore»).
+- `tweakdesk.exe` ha un manifest che chiede sempre l'amministratore (UAC) all'avvio: Windows mostra il prompt prima ancora di aprire la finestra, quindi non capita più di scoprire a metà lavoro che una voce serve l'amministratore.
 
 ## Note
 - Usa `reg.exe` (indipendente dalla lingua di Windows). Compilazione: `costruisci-tweakdesk.cmd`.

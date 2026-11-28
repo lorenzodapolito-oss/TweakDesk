@@ -106,4 +106,16 @@ mod tests {
         assert!(t.contains(app::APP_VERSION));
         assert!(t.contains("Errore.") && t.contains("dettaglio X"));
     }
+
+    /// Molte voci del catalogo richiedono comunque l'amministratore (registro HKLM, servizi,
+    /// DISM, creazione ISO): il manifest fa sì che Windows lo chieda sempre all'avvio, invece
+    /// di scoprirlo a metà lavoro. Se qualcuno toglie questa riga dal manifest per sbaglio,
+    /// questo test lo segnala (build.rs lo incorpora con `set_manifest_file`, non testabile
+    /// direttamente qui perché gira solo su Windows).
+    #[test]
+    fn admin_manifest_requires_administrator() {
+        let m = include_str!("../assets/app.manifest");
+        assert!(m.contains(r#"level="requireAdministrator""#));
+        assert!(m.contains("requestedExecutionLevel"));
+    }
 }
