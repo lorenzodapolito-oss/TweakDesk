@@ -5,6 +5,10 @@ pub enum Level {
     Sicuro,
     Standard,
     Estremo,
+    /// Non scelte dal pulsante "Estremo": solo spuntando la singola voce.
+    /// Per via dell'ordine di dichiarazione (PartialOrd/Ord derivati) questo livello
+    /// viene dopo Estremo, cosi' `livello <= Level::Estremo` lo esclude da ogni preset.
+    Extra,
 }
 
 impl Level {
@@ -13,6 +17,7 @@ impl Level {
             Level::Sicuro => "Sicuro",
             Level::Standard => "Standard",
             Level::Estremo => "Estremo",
+            Level::Extra => "Extra (solo singolarmente)",
         }
     }
 }
@@ -109,7 +114,7 @@ pub struct Item {
 
 use Act::{Appx, Capability, Cmd, Delete, Feature, Reg, RegDel, ResetBase, Svc, Task};
 use Group::{Apps, Componenti, Interfaccia, Prestazioni, Privacy, Pulizia, Servizi};
-use Level::{Estremo, Sicuro, Standard};
+use Level::{Estremo, Extra, Sicuro, Standard};
 use RegKind::{Dword, Sz};
 use Scope::{Both, IsoOnly, OnlineOnly};
 
@@ -211,21 +216,21 @@ pub const ITEMS: &[Item] = &[
     app!("officehub", Standard, "Hub di Microsoft 365", "Microsoft.MicrosoftOfficeHub"),
     app!("people", Standard, "Contatti", "Microsoft.People"),
     app!("journal", Standard, "Journal", "Microsoft.MicrosoftJournal"),
-    // ---------- App: Estremo ----------
-    it("store", Apps, Estremo, "Microsoft Store", "Senza Store non potrai installare app da lì. Anche winget può smettere di funzionare.", Both, &[
+    // ---------- App: Extra (non nel pulsante "Estremo", solo singolarmente) ----------
+    it("store", Apps, Extra, "Microsoft Store", "Senza Store non potrai installare app da lì. Anche winget può smettere di funzionare.", Both, &[
         Appx("Microsoft.WindowsStore"),
         Appx("Microsoft.StorePurchaseApp"),
         Appx("Microsoft.Services.Store.Engagement"),
     ]),
-    it("winget", Apps, Estremo, "Programma di installazione app (winget)", "Perdi il comando winget e l'installazione dei programmi da riga di comando.", Both, &[Appx("Microsoft.DesktopAppInstaller")]),
-    app!("calc", Estremo, "Calcolatrice", "Microsoft.WindowsCalculator"),
-    app!("photos", Estremo, "Foto", "Microsoft.Windows.Photos"),
-    app!("camera", Estremo, "Fotocamera", "Microsoft.WindowsCamera"),
-    app!("snip", Estremo, "Strumento di cattura", "Microsoft.ScreenSketch"),
-    app!("paint", Estremo, "Paint", "Microsoft.Paint"),
-    app!("notepad", Estremo, "Blocco note (app)", "Microsoft.WindowsNotepad"),
-    app!("terminal", Estremo, "Terminale Windows", "Microsoft.WindowsTerminal"),
-    it("sechealth", Apps, Estremo, "Sicurezza di Windows (interfaccia)", "Senza l'interfaccia non puoi più gestire Defender dalle Impostazioni.", Both, &[Appx("Microsoft.SecHealthUI")]),
+    it("winget", Apps, Extra, "Programma di installazione app (winget)", "Perdi il comando winget e l'installazione dei programmi da riga di comando.", Both, &[Appx("Microsoft.DesktopAppInstaller")]),
+    app!("calc", Extra, "Calcolatrice", "Microsoft.WindowsCalculator"),
+    app!("photos", Extra, "Foto", "Microsoft.Windows.Photos"),
+    app!("camera", Extra, "Fotocamera", "Microsoft.WindowsCamera"),
+    app!("snip", Extra, "Strumento di cattura", "Microsoft.ScreenSketch"),
+    app!("paint", Extra, "Paint", "Microsoft.Paint"),
+    app!("notepad", Extra, "Blocco note (app)", "Microsoft.WindowsNotepad"),
+    app!("terminal", Extra, "Terminale Windows", "Microsoft.WindowsTerminal"),
+    it("sechealth", Apps, Extra, "Sicurezza di Windows (interfaccia)", "Senza l'interfaccia non puoi più gestire Defender dalle Impostazioni.", Both, &[Appx("Microsoft.SecHealthUI")]),
     // ---------- Privacy: Sicuro ----------
     it("ad_id", Privacy, Sicuro, "ID pubblicitario spento", "", Both, &[d("HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\AdvertisingInfo", "Enabled", "0")]),
     it("suggest", Privacy, Sicuro, "Suggerimenti, consigli e app promosse nel menu Start", "", Both, &[
@@ -364,7 +369,7 @@ pub const ITEMS: &[Item] = &[
         Svc { name: "SecurityHealthService", start: 4 },
     ]),
     it("smartscreen", Servizi, Estremo, "SmartScreen spento", "Perdi l'avviso su file e siti pericolosi.", Both, &[d(POL_SYS, "EnableSmartScreen", "0")]),
-    it("svc_store", Servizi, Estremo, "Servizi dello Store", "", Both, &[
+    it("svc_store", Servizi, Extra, "Servizi dello Store", "", Both, &[
         Svc { name: "InstallService", start: 4 },
         Svc { name: "WSService", start: 4 },
         Svc { name: "LicenseManager", start: 4 },
@@ -407,14 +412,15 @@ pub const ITEMS: &[Item] = &[
         Feature("Printing-XPSServices-Features"),
     ]),
     it("fax", Componenti, Estremo, "Fax e scanner di Windows", "", Both, &[Feature("FaxServicesClientPackage")]),
-    it("winre", Componenti, Estremo, "Ambiente di ripristino (WinRE)", "Senza WinRE non funzionano «Ripristina il PC» e la riparazione all'avvio.", IsoOnly, &[Delete("System32\\Recovery\\Winre.wim")]),
-    it("lang_extra", Componenti, Estremo, "Riconoscimento vocale, scrittura a mano, OCR e sintesi vocale", "", Both, &[
+    // ---------- Componenti: Extra (non nel pulsante "Estremo", solo singolarmente) ----------
+    it("winre", Componenti, Extra, "Ambiente di ripristino (WinRE)", "Senza WinRE non funzionano «Ripristina il PC» e la riparazione all'avvio.", IsoOnly, &[Delete("System32\\Recovery\\Winre.wim")]),
+    it("lang_extra", Componenti, Extra, "Riconoscimento vocale, scrittura a mano, OCR e sintesi vocale", "", Both, &[
         Capability("Language.Handwriting"),
         Capability("Language.OCR"),
         Capability("Language.Speech"),
         Capability("Language.TextToSpeech"),
     ]),
-    it("hello", Componenti, Estremo, "Windows Hello (viso e impronte)", "", Both, &[Capability("Hello.Face"), Capability("Hello.Face.Migration")]),
+    it("hello", Componenti, Extra, "Windows Hello (viso e impronte)", "", Both, &[Capability("Hello.Face"), Capability("Hello.Face.Migration")]),
     // ---------- Pulizia ----------
     it("clean_files", Pulizia, Standard, "File inutili (temporanei, log, Panther, download di aggiornamento)", "", Both, &[
         Delete("Logs\\*"),
@@ -487,7 +493,7 @@ mod tests {
 
     #[test]
     fn every_level_and_group_present() {
-        for l in [Sicuro, Standard, Estremo] {
+        for l in [Sicuro, Standard, Estremo, Extra] {
             assert!(ITEMS.iter().any(|i| i.level == l));
         }
         for g in Group::ALL {

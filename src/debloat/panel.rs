@@ -485,7 +485,7 @@ impl DebloatPanel {
             if ui.button("Standard (include il Sicuro)").clicked() {
                 *checked = preset(iso, Some(Level::Standard));
             }
-            if ui.button("Estremo (tutto)").clicked() {
+            if ui.button("Estremo").clicked() {
                 *checked = preset(iso, Some(Level::Estremo));
             }
             if ui.button("Nessuna").clicked() {
@@ -495,11 +495,12 @@ impl DebloatPanel {
             ui.label(RichText::new(format!("{n} voci scelte")).color(theme::MUTED));
         });
         ui.add_space(4.0);
-        for level in [Level::Sicuro, Level::Standard, Level::Estremo] {
+        for level in [Level::Sicuro, Level::Standard, Level::Estremo, Level::Extra] {
             let bg = match level {
                 Level::Sicuro => theme::LEVEL_SAFE,
                 Level::Standard => theme::LEVEL_STANDARD,
                 Level::Estremo => theme::LEVEL_EXTREME,
+                Level::Extra => theme::LEVEL_EXTRA,
             };
             egui::CollapsingHeader::new(
                 RichText::new(format!(" {} ", level.title()))
@@ -509,7 +510,7 @@ impl DebloatPanel {
                     .background_color(bg),
             )
             .id_salt(("lvl", iso, level.title()))
-            .default_open(level != Level::Estremo)
+            .default_open(level != Level::Estremo && level != Level::Extra)
             .show(ui, |ui| {
                 for g in Group::ALL {
                     let items: Vec<&'static Item> = items_for(iso)
@@ -960,10 +961,32 @@ mod tests {
         }
         let st = preset(false, Some(Level::Standard));
         for i in items_for(false) {
-            assert_eq!(st[i.id], i.level != Level::Estremo, "{}", i.id);
+            assert_eq!(
+                st[i.id],
+                i.level == Level::Sicuro || i.level == Level::Standard,
+                "{}",
+                i.id
+            );
         }
-        assert!(preset(true, Some(Level::Estremo)).values().all(|v| *v));
+        let e = preset(true, Some(Level::Estremo));
+        for i in items_for(true) {
+            assert_eq!(e[i.id], i.level != Level::Extra, "{}", i.id);
+        }
         assert!(preset(true, None).values().all(|v| !*v));
+    }
+
+    #[test]
+    fn estremo_preset_leaves_out_extra_level_items() {
+        // Il pulsante "Estremo" seleziona Sicuro+Standard+Estremo, ma non Extra: quelle voci
+        // (es. Paint, Calcolatrice, Store) si scelgono solo spuntandole singolarmente.
+        let e = preset(false, Some(Level::Estremo));
+        for i in items_for(false) {
+            if i.level == Level::Extra {
+                assert!(!e[i.id], "{} non dovrebbe essere incluso da Estremo", i.id);
+            }
+        }
+        assert!(!e["paint"]);
+        assert!(e["hyperv"]);
     }
 
     #[test]
